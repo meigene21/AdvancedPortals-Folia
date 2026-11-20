@@ -27,7 +27,7 @@ import java.util.Objects;
  */
 public class ShowPortalSubCommand
     implements SubCommand, SubCommand.SubCommandOnInit {
-    boolean alternate_show_trigger = true;
+    private volatile boolean alternate_show_trigger = true;
 
     @Inject
     PlayerDataServices playerDataServices;
@@ -60,8 +60,13 @@ public class ShowPortalSubCommand
 
     @Override
     public void onCommand(CommandSenderContainer sender, String[] args) {
-        PlayerData tempData =
-            playerDataServices.getPlayerData(sender.getPlayerContainer());
+        PlayerContainer player = sender.getPlayerContainer();
+        if (player == null) {
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translate("command.playeronly"));
+            return;
+        }
+        PlayerData tempData = playerDataServices.getPlayerData(player);
         if (tempData.isPortalVisible()) {
             sender.sendMessage(
                 Lang.getNegativePrefix()
@@ -97,7 +102,8 @@ public class ShowPortalSubCommand
     @Override
     public void registered() {
         gameScheduler.intervalTickEvent("show_portal", () -> {
-            alternate_show_trigger = !alternate_show_trigger;
+            final boolean showTrigger = !alternate_show_trigger;
+            alternate_show_trigger = showTrigger;
             for (PlayerContainer player : serverContainer.getPlayers()) {
                 PlayerData tempData = playerDataServices.getPlayerData(player);
 
@@ -117,7 +123,8 @@ public class ShowPortalSubCommand
                         int widthZ = Math.abs(pos1.getPosZ() - pos2.getPosZ());
                         int totalBlocks = widthX * widthY * widthZ;
                         if (totalBlocks <= config.maxPortalVisualisationSize())
-                            debugVisuals(player, pos1, pos2, SELECTION_COLOR);
+                            debugVisuals(player, pos1, pos2, SELECTION_COLOR,
+                                         showTrigger);
                     }
 
                     if (pos1 != null
@@ -146,7 +153,7 @@ public class ShowPortalSubCommand
                                 && portal.isLocationInPortal(
                                 player.getLoc(), config.getShowVisibleRange())) {
                             debugVisuals(player, portal, OUTLINE_COLOR,
-                                    TRIGGER_COLOR);
+                                    TRIGGER_COLOR, showTrigger);
                         }
                     }
                 });
@@ -155,14 +162,16 @@ public class ShowPortalSubCommand
     }
 
     private void debugVisuals(PlayerContainer player, BlockLocation pos1,
-                              BlockLocation pos2, Color color) {
-        debugVisuals(player, pos1, pos2, color, null, null);
+                              BlockLocation pos2, Color color,
+                              boolean showTrigger) {
+        debugVisuals(player, pos1, pos2, color, null, null, showTrigger);
     }
 
     private void debugVisuals(PlayerContainer player, AdvancedPortal portal,
-                              Color color, Color triggerColor) {
+                              Color color, Color triggerColor,
+                              boolean showTrigger) {
         debugVisuals(player, portal.getMinLoc(), portal.getMaxLoc(), color,
-                     triggerColor, portal);
+                     triggerColor, portal, showTrigger);
     }
 
     private void drawBox(PlayerContainer player, BlockLocation pos1,
@@ -204,7 +213,8 @@ public class ShowPortalSubCommand
 
     private void debugVisuals(PlayerContainer player, BlockLocation pos1,
                               BlockLocation pos2, Color color,
-                              Color triggerColor, AdvancedPortal portal) {
+                              Color triggerColor, AdvancedPortal portal,
+                              boolean showTrigger) {
         int minX = Math.min(pos1.getPosX(), pos2.getPosX());
         int minY = Math.min(pos1.getPosY(), pos2.getPosY());
         int minZ = Math.min(pos1.getPosZ(), pos2.getPosZ());
@@ -220,17 +230,18 @@ public class ShowPortalSubCommand
         if (size <= config.maxPortalVisualisationSize()) {
             drawBox(player, pos1, pos2, color, 0.5f);
 
-            for (int x = minX; x <= maxX; x++) {
-                for (int y = minY; y <= maxY; y++) {
-                    for (int z = minZ; z <= maxZ; z++) {
-                        BlockLocation pos =
-                            new BlockLocation(pos1.getWorldName(), x, y, z);
-                        boolean isTrigger = portal != null
-                            && portal.isTriggerBlock(world.getBlock(pos));
-                        if (isTrigger && alternate_show_trigger)
-                            player.spawnColoredDust(pos.toVector().add(OFFSET),
-                                                    0.2, 0.2, 0.2, 1,
-                                                    triggerColor);
+            if (portal != null && showTrigger) {
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            BlockLocation pos =
+                                new BlockLocation(pos1.getWorldName(), x, y, z);
+                            if (portal.isTriggerBlock(world.getBlock(pos))) {
+                                player.spawnColoredDust(
+                                    pos.toVector().add(OFFSET), 0.2, 0.2, 0.2,
+                                    1, triggerColor);
+                            }
+                        }
                     }
                 }
             }

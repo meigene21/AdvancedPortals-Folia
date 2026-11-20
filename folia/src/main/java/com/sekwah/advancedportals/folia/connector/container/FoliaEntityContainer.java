@@ -6,14 +6,15 @@ import com.sekwah.advancedportals.core.connector.containers.WorldContainer;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import com.sekwah.advancedportals.core.serializeddata.PlayerLocation;
 import com.sekwah.advancedportals.core.serializeddata.Vector;
+import com.sekwah.advancedportals.folia.AdvancedPortalsPlugin;
 import com.sekwah.advancedportals.shadowed.inject.Inject;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.Entity;
 
 /**
- * Just a temporary container for whenever advanced portals needs to get data
- * from a player
+ * Folia-safe entity container wrapping Bukkit {@link Entity}.
  */
 public class FoliaEntityContainer implements EntityContainer {
     @Inject
@@ -47,9 +48,16 @@ public class FoliaEntityContainer implements EntityContainer {
 
     @Override
     public boolean teleport(PlayerLocation location) {
+        if (location == null || location.getWorldName() == null) {
+            return false;
+        }
+        World world = Bukkit.getWorld(location.getWorldName());
+        if (world == null) {
+            return false;
+        }
         this.entity.teleportAsync(new Location(
-                Bukkit.getWorld(location.getWorldName()), location.getPosX(),
-                location.getPosY(), location.getPosZ()));
+            world, location.getPosX(), location.getPosY(), location.getPosZ(),
+            location.getYaw(), location.getPitch()));
         return true;
     }
 
@@ -70,7 +78,15 @@ public class FoliaEntityContainer implements EntityContainer {
 
     @Override
     public void setVelocity(Vector vector) {
-        this.entity.setVelocity(new org.bukkit.util.Vector(
-            vector.getX(), vector.getY(), vector.getZ()));
+        org.bukkit.util.Vector velocity = new org.bukkit.util.Vector(
+            vector.getX(), vector.getY(), vector.getZ());
+        if (Bukkit.isOwnedByCurrentRegion(this.entity)) {
+            this.entity.setVelocity(velocity);
+        } else {
+            this.entity.getScheduler().run(
+                AdvancedPortalsPlugin.getInstance(),
+                task -> this.entity.setVelocity(velocity),
+                null);
+        }
     }
 }

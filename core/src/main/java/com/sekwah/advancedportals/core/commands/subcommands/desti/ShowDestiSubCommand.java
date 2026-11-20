@@ -47,8 +47,13 @@ public class ShowDestiSubCommand
 
     @Override
     public void onCommand(CommandSenderContainer sender, String[] args) {
-        PlayerData tempData =
-            tempDataServices.getPlayerData(sender.getPlayerContainer());
+        PlayerContainer player = sender.getPlayerContainer();
+        if (player == null) {
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translate("command.playeronly"));
+            return;
+        }
+        PlayerData tempData = tempDataServices.getPlayerData(player);
         if (tempData.isDestiVisible()) {
             sender.sendMessage(
                 Lang.getNegativePrefix()
@@ -84,7 +89,7 @@ public class ShowDestiSubCommand
 
     @Override
     public void registered() {
-        gameScheduler.intervalTickEvent("show_portal", () -> {
+        gameScheduler.intervalTickEvent("show_desti", () -> {
             for (PlayerContainer player : serverContainer.getPlayers()) {
                 PlayerData tempData = tempDataServices.getPlayerData(player);
                 if (!tempData.isDestiVisible()) {

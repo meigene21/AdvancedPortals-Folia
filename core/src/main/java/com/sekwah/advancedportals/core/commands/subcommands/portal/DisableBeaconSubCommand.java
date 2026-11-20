@@ -3,6 +3,7 @@ package com.sekwah.advancedportals.core.commands.subcommands.portal;
 import com.google.inject.Inject;
 import com.sekwah.advancedportals.core.commands.SubCommand;
 import com.sekwah.advancedportals.core.connector.containers.CommandSenderContainer;
+import com.sekwah.advancedportals.core.connector.containers.WorldContainer;
 import com.sekwah.advancedportals.core.permissions.Permissions;
 import com.sekwah.advancedportals.core.portal.AdvancedPortal;
 import com.sekwah.advancedportals.core.services.PortalServices;
@@ -25,11 +26,20 @@ public class DisableBeaconSubCommand implements SubCommand {
                         "command.portal.disablebeacon.notfound", portalName));
                 return;
             }
+            WorldContainer world =
+                sender.getServer().getWorld(portal.getMinLoc().getWorldName());
+            if (world == null) {
+                sender.sendMessage(
+                    Lang.getNegativePrefix()
+                    + Lang.translateInsertVariables(
+                        "command.portal.disablebeacon.notfound", portalName));
+                return;
+            }
             sender.sendMessage(
                 Lang.getPositivePrefix()
                 + Lang.translateInsertVariables(
                     "command.portal.disablebeacon.complete", portalName));
-            sender.getPlayerContainer().getWorld().disableBeacon(portal);
+            world.disableBeacon(portal);
         } else {
             sender.sendMessage(
                 Lang.getNegativePrefix()

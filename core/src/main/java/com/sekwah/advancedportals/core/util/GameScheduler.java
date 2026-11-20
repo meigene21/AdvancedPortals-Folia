@@ -3,29 +3,42 @@ package com.sekwah.advancedportals.core.util;
 import com.google.inject.Singleton;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * For all delayed and repeating tasks.
+ * Thread-safe for Folia where tasks may be queued from any region thread while
+ * {@link #tick()} executes on the global region scheduler.
  */
 @Singleton
 public final class GameScheduler {
-    private final ArrayList<DelayedGameTickEvent> newTickEvents =
-        new ArrayList<>();
-    private final ArrayList<DelayedGameTickEvent> delayedTickEvents =
+    private final Queue<DelayedGameTickEvent> newTickEvents =
+        new ConcurrentLinkedQueue<>();
+    private final List<DelayedGameTickEvent> delayedTickEvents =
         new ArrayList<>();
 
-    public void tick() {
-        this.delayedTickEvents.addAll(this.newTickEvents);
-        this.newTickEvents.clear();
+    public synchronized void tick() {
+        DelayedGameTickEvent pending;
+        while ((pending = this.newTickEvents.poll()) != null) {
+            this.delayedTickEvents.add(pending);
+        }
+
         Iterator<DelayedGameTickEvent> tickEventIterator =
             this.delayedTickEvents.iterator();
         while (tickEventIterator.hasNext()) {
             DelayedGameTickEvent event = tickEventIterator.next();
             event.tick();
             if (event.shouldRun()) {
-                event.run();
-                if (!(event instanceof DelayedGameIntervalEvent))
+                try {
+                    event.run();
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+                if (!(event instanceof DelayedGameIntervalEvent)) {
                     tickEventIterator.remove();
+                }
             }
         }
     }
@@ -42,7 +55,7 @@ public final class GameScheduler {
             new DelayedGameIntervalEvent(name, consumer, tickDelay, interval));
     }
 
-    public void clearAllEvents() {
+    public synchronized void clearAllEvents() {
         this.newTickEvents.clear();
         this.delayedTickEvents.clear();
     }
@@ -81,6 +94,7 @@ public final class GameScheduler {
             this.interval = interval;
         }
 
+        @Override
         public void run() {
             this.ticks = interval;
             super.run();

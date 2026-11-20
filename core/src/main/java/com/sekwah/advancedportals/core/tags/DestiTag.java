@@ -15,7 +15,7 @@ import com.sekwah.advancedportals.core.util.Lang;
 import com.sekwah.advancedportals.core.warphandler.ActivationData;
 import com.sekwah.advancedportals.core.warphandler.Tag;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
     public static final String TAG_NAME = "destination";
@@ -47,8 +47,6 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
         return TAG_NAME;
     }
 
-    private final Random random = new Random();
-
     @Override
     public String[] getAliases() {
         return new String[] {"desti"};
@@ -65,7 +63,8 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
         if (argData == null || argData.length == 0) {
             return false;
         }
-        String selectedArg = argData[random.nextInt(argData.length)];
+        String selectedArg =
+            argData[ThreadLocalRandom.current().nextInt(argData.length)];
 
         activeData.setMetadata(TAG_NAME, selectedArg);
 
@@ -73,7 +72,9 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
             return true;
         }
 
-        if (destinationServices.getDestination(selectedArg) == null) {
+        Destination destination =
+            destinationServices.getDestination(selectedArg);
+        if (destination == null) {
             player.sendMessage(Lang.getNegativePrefix()
                                + Lang.translateInsertVariables(
                                    "desti.error.notfound", selectedArg));
@@ -81,18 +82,14 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
         }
 
         // Check and trigger all tags on the destination
-        Destination destination =
-            destinationServices.getDestination(selectedArg);
-        if (destination != null) {
-            for (DataTag destiTag : destination.getArgs()) {
-                Tag.Activation activationHandler =
-                    tagRegistry.getActivationHandler(destiTag.NAME,
-                                                     Tag.TagType.DESTINATION);
-                if (activationHandler != null
-                    && !activationHandler.preActivated(
-                        target, player, activeData, destiTag.VALUES)) {
-                    return false;
-                }
+        for (DataTag destiTag : destination.getArgs()) {
+            Tag.Activation activationHandler =
+                tagRegistry.getActivationHandler(destiTag.NAME,
+                                                 Tag.TagType.DESTINATION);
+            if (activationHandler != null
+                && !activationHandler.preActivated(
+                    target, player, activeData, destiTag.VALUES)) {
+                return false;
             }
         }
 
@@ -139,6 +136,9 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
         String selectedArg = activationData.getMetadata(TAG_NAME);
         Destination destination =
             destinationServices.getDestination(selectedArg);
+        if (destination == null) {
+            return false;
+        }
 
         if (serverContainer.getWorld(destination.getLoc().getWorldName())
             == null) {
@@ -150,37 +150,28 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
             return false;
         }
 
-        if (destination != null) {
-            WarpEffect.Visual warpEffectVisual =
-                warpEffectRegistry.getVisualEffect(
-                    configRepository.getWarpVisual());
-            WarpEffect.Sound warpEffectSound =
-                warpEffectRegistry.getSoundEffect(
-                    configRepository.getWarpSound());
-            if (configRepository.getWarpEffectEnabled()) {
-                if (warpEffectVisual != null) {
-                    warpEffectVisual.onWarpVisual(player,
-                                                  WarpEffect.Action.ENTER);
-                }
-                if (warpEffectSound != null) {
-                    warpEffectSound.onWarpSound(player,
-                                                WarpEffect.Action.ENTER);
-                }
+        WarpEffect.Visual warpEffectVisual =
+            warpEffectRegistry.getVisualEffect(
+                configRepository.getWarpVisual());
+        WarpEffect.Sound warpEffectSound =
+            warpEffectRegistry.getSoundEffect(
+                configRepository.getWarpSound());
+        boolean warpEffectEnabled = configRepository.getWarpEffectEnabled();
+
+        if (warpEffectEnabled) {
+            if (warpEffectVisual != null) {
+                warpEffectVisual.onWarpVisual(player,
+                                              WarpEffect.Action.ENTER);
             }
-
-            player.teleport(destination.getLoc());
-
-            for (DataTag destiTag : destination.getArgs()) {
-                Tag.Activation activationHandler =
-                    tagRegistry.getActivationHandler(destiTag.NAME,
-                                                     Tag.TagType.DESTINATION);
-                if (activationHandler != null) {
-                    activationHandler.activated(target, player, activationData,
-                                                argData);
-                }
+            if (warpEffectSound != null) {
+                warpEffectSound.onWarpSound(player,
+                                            WarpEffect.Action.ENTER);
             }
+        }
 
-            if (configRepository.getWarpEffectEnabled()) {
+        Runnable postTeleport = null;
+        if (warpEffectEnabled) {
+            postTeleport = () -> {
                 if (warpEffectVisual != null) {
                     warpEffectVisual.onWarpVisual(player,
                                                   WarpEffect.Action.EXIT);
@@ -188,9 +179,22 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
                 if (warpEffectSound != null) {
                     warpEffectSound.onWarpSound(player, WarpEffect.Action.EXIT);
                 }
-            }
-            activationData.setWarpStatus(ActivationData.WarpedStatus.WARPED);
+            };
         }
+
+        player.teleport(destination.getLoc(), postTeleport);
+
+        for (DataTag destiTag : destination.getArgs()) {
+            Tag.Activation activationHandler =
+                tagRegistry.getActivationHandler(destiTag.NAME,
+                                                 Tag.TagType.DESTINATION);
+            if (activationHandler != null) {
+                activationHandler.activated(target, player, activationData,
+                                            argData);
+            }
+        }
+
+        activationData.setWarpStatus(ActivationData.WarpedStatus.WARPED);
         return true;
     }
 

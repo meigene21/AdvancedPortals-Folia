@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Singleton
 public class DestinationServices {
@@ -32,7 +33,8 @@ public class DestinationServices {
     @Inject
     TagRegistry tagRegistry;
 
-    private final Map<String, Destination> destinationCache = new HashMap<>();
+    private final Map<String, Destination> destinationCache =
+        new ConcurrentHashMap<>();
 
     public List<String> getDestinationNames() {
         return destinationRepository.getAllNames();
@@ -44,11 +46,15 @@ public class DestinationServices {
 
     public void loadDestinations() {
         List<String> destinationNames = destinationRepository.getAllNames();
-        destinationCache.clear();
+        Map<String, Destination> loaded = new HashMap<>();
         for (String name : destinationNames) {
             Destination destination = destinationRepository.get(name);
-            destinationCache.put(name, destination);
+            if (destination != null) {
+                loaded.put(name, destination);
+            }
         }
+        destinationCache.keySet().retainAll(loaded.keySet());
+        destinationCache.putAll(loaded);
     }
 
     public Destination createDesti(PlayerLocation playerLocation,
@@ -155,41 +161,48 @@ public class DestinationServices {
     public boolean teleportToDestination(String name, PlayerContainer player,
                                          boolean doEffect) {
         try {
-            if (this.destinationRepository.containsKey(name)) {
+            Destination destination = this.destinationCache.get(name);
+            if (destination == null
+                && this.destinationRepository.containsKey(name)) {
+                destination = this.destinationRepository.get(name);
+                if (destination != null) {
+                    this.destinationCache.put(name, destination);
+                }
+            }
+            if (destination != null) {
                 if (player.getServer().getWorld(
-                        this.destinationRepository.get(name)
-                            .getLoc()
-                            .getWorldName())
+                        destination.getLoc().getWorldName())
                     == null) {
                     player.sendMessage(
                         Lang.getNegativePrefix()
                         + Lang.translateInsertVariables(
                             "desti.error.invalidworld",
-                            destinationRepository.get(name).getName(),
-                            destinationRepository.get(name)
-                                .getLoc()
-                                .getWorldName()));
+                            destination.getName(),
+                            destination.getLoc().getWorldName()));
                     return false;
                 }
 
-                player.teleport(this.destinationRepository.get(name).getLoc());
+                Runnable postTeleportEffect = null;
                 if (doEffect && configRepository.getWarpEffectEnabled()) {
                     WarpEffect.Visual warpEffectVisual =
                         warpEffectRegistry.getVisualEffect(
                             configRepository.getWarpVisual());
-                    if (warpEffectVisual != null) {
-                        warpEffectVisual.onWarpVisual(player,
-                                                      WarpEffect.Action.ENTER);
-                    }
                     WarpEffect.Sound warpEffectSound =
                         warpEffectRegistry.getSoundEffect(
                             configRepository.getWarpSound());
-                    if (warpEffectSound != null) {
-                        warpEffectSound.onWarpSound(player,
-                                                    WarpEffect.Action.ENTER);
-                    }
+                    postTeleportEffect = () -> {
+                        if (warpEffectVisual != null) {
+                            warpEffectVisual.onWarpVisual(
+                                player, WarpEffect.Action.ENTER);
+                        }
+                        if (warpEffectSound != null) {
+                            warpEffectSound.onWarpSound(
+                                player, WarpEffect.Action.ENTER);
+                        }
+                    };
                 }
-                return true;
+
+                return player.teleport(destination.getLoc(), postTeleportEffect);
             }
             return false;
         } catch (IllegalArgumentException e) {
@@ -252,17 +265,24 @@ public class DestinationServices {
      * @param newLoc The new PlayerLocation.
      * @param player The player requesting the change (for feedback).
      */
-    public void changeDestinationLocation(String name, PlayerLocation newLoc, PlayerContainer player) {
+    public void changeDestinationLocation(String name, PlayerLocation newLoc,
+                                          PlayerContainer player) {
         Destination destination = destinationRepository.get(name);
         if (destination == null) {
-            player.sendMessage(Lang.getNegativePrefix() + Lang.translateInsertVariables("command.destination.notfound", name));
+            player.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translateInsertVariables(
+                                   "command.destination.notfound", name));
             return;
         }
         destination.setLoc(newLoc);
         if (destinationRepository.save(name, destination)) {
-            player.sendMessage(Lang.getPositivePrefix() + Lang.translateInsertVariables("command.destination.moved", name));
+            destinationCache.put(name, destination);
+            player.sendMessage(Lang.getPositivePrefix()
+                               + Lang.translateInsertVariables(
+                                   "command.destination.moved", name));
         } else {
-            player.sendMessage(Lang.getNegativePrefix() + Lang.translate("command.destination.move.error"));
+            player.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translate("command.destination.move.error"));
         }
     }
 }

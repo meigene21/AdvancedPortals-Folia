@@ -19,6 +19,7 @@ import com.sekwah.advancedportals.core.util.PlayerUtils;
 import com.sekwah.advancedportals.core.warphandler.Tag;
 import com.sekwah.advancedportals.core.warphandler.TriggerType;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 
 @Singleton
@@ -32,28 +33,31 @@ public class PortalServices {
     @Inject
     private ConfigRepository configRepository;
 
-    private final Map<String, AdvancedPortal> portalCache = new HashMap<>();
+    private final Map<String, AdvancedPortal> portalCache =
+        new ConcurrentHashMap<>();
 
     @Inject
     TagRegistry tagRegistry;
 
     public void loadPortals() {
         List<String> portalNames = portalRepository.getAllNames();
-        portalCache.clear();
+        Map<String, AdvancedPortal> loaded = new HashMap<>();
         for (String name : portalNames) {
             AdvancedPortal portal = portalRepository.get(name);
             if (portal == null) {
                 continue;
             }
-            portalCache.put(name, portal);
             portal.updateBounds(portal.getMinLoc(), portal.getMaxLoc());
+            loaded.put(name, portal);
         }
+        portalCache.keySet().retainAll(loaded.keySet());
+        portalCache.putAll(loaded);
     }
 
     public boolean inPortalRegionProtected(BlockLocation loc) {
+        int radius = configRepository.getProtectionRadius();
         for (AdvancedPortal portal : portalCache.values()) {
-            if (portal.isLocationInPortal(
-                    loc, configRepository.getProtectionRadius())) {
+            if (portal.isLocationInPortal(loc, radius)) {
                 return true;
             }
         }
@@ -61,9 +65,9 @@ public class PortalServices {
     }
 
     public boolean inPortalRegionProtected(PlayerLocation loc) {
+        int radius = configRepository.getProtectionRadius();
         for (AdvancedPortal portal : portalCache.values()) {
-            if (portal.isLocationInPortal(
-                    loc, configRepository.getProtectionRadius())) {
+            if (portal.isLocationInPortal(loc, radius)) {
                 return true;
             }
         }
@@ -104,6 +108,9 @@ public class PortalServices {
 
     public PortalActivationResult checkPortalActivation(
         PlayerContainer player, PlayerLocation toLoc, TriggerType triggerType) {
+        if (portalCache.isEmpty()) {
+            return PortalActivationResult.NOT_IN_PORTAL;
+        }
         if (configRepository.blockSpectatorMode()
             && player.getGameMode() == GameMode.SPECTATOR) {
             return PortalActivationResult.NOT_IN_PORTAL;
@@ -111,22 +118,57 @@ public class PortalServices {
 
         BlockLocation blockLoc = toLoc.toBlockPos();
         BlockLocation blockEntityTopLoc = blockLoc.addY(player.getHeight());
-        WorldContainer world = player.getWorld();
-        String blockMaterial = world.getBlock(blockLoc);
-        boolean blockMaterialWaterlogged = world.isWaterlogged(blockLoc);
-        String blockEntityTopMaterial = world.getBlock(blockEntityTopLoc);
-        boolean blockEntityTopMaterialWaterlogged =
-            world.isWaterlogged(blockEntityTopLoc);
         PlayerData playerData = playerDataServices.getPlayerData(player);
 
+        // Lazily resolve world blocks only when the player is actually inside
+        // a portal's bounding box. Avoids 4 world lookups per move event and
+        // prevents off-region block reads on Folia when moving near borders.
+        WorldContainer world = null;
+        String blockMaterial = null;
+        boolean blockMaterialWaterlogged = false;
+        boolean loadedBottomBlock = false;
+        String blockEntityTopMaterial = null;
+        boolean blockEntityTopMaterialWaterlogged = false;
+        boolean loadedTopBlock = false;
+
         for (AdvancedPortal portal : portalCache.values()) {
+            boolean inBottom = portal.isLocationInPortal(toLoc);
+            boolean inTop = !inBottom && portal.isLocationInPortal(blockEntityTopLoc);
+            boolean checkTop = inTop || (inBottom && portal.isLocationInPortal(blockEntityTopLoc));
+
+            if (!inBottom && !inTop) {
+                continue;
+            }
+
+            if (world == null) {
+                world = player.getWorld();
+            }
+
             boolean checkWaterLogged = portal.isTriggerBlock("water");
-            if ((portal.isLocationInPortal(toLoc)
-                 && ((checkWaterLogged && blockMaterialWaterlogged)
-                     || portal.isTriggerBlock(blockMaterial)))
-                || (portal.isLocationInPortal(blockEntityTopLoc)
-                    && ((checkWaterLogged && blockEntityTopMaterialWaterlogged)
-                        || portal.isTriggerBlock(blockEntityTopMaterial)))) {
+            boolean triggered = false;
+
+            if (inBottom) {
+                if (!loadedBottomBlock) {
+                    blockMaterial = world.getBlock(blockLoc);
+                    blockMaterialWaterlogged = world.isWaterlogged(blockLoc);
+                    loadedBottomBlock = true;
+                }
+                triggered = (checkWaterLogged && blockMaterialWaterlogged)
+                    || portal.isTriggerBlock(blockMaterial);
+            }
+
+            if (!triggered && checkTop) {
+                if (!loadedTopBlock) {
+                    blockEntityTopMaterial = world.getBlock(blockEntityTopLoc);
+                    blockEntityTopMaterialWaterlogged =
+                        world.isWaterlogged(blockEntityTopLoc);
+                    loadedTopBlock = true;
+                }
+                triggered = (checkWaterLogged && blockEntityTopMaterialWaterlogged)
+                    || portal.isTriggerBlock(blockEntityTopMaterial);
+            }
+
+            if (triggered) {
                 String portalName = portal.getName();
                 if (Objects.equals(playerData.inPortal(), portalName)) {
                     return PortalActivationResult.PORTAL_DENIED;

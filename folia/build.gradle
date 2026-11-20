@@ -38,10 +38,11 @@ dependencies {
     implementation project(":core")
     runtimeOnly project(path: ':core', configuration: 'shadow')
 
-    compileOnly "dev.folia:folia-api:26.1.2.build.8-stable"
+    compileOnly "dev.folia:folia-api:1.21.4-R0.1-SNAPSHOT"
 
     // Soft dependencies
     compileOnly 'me.clip:placeholderapi:2.11.6'
+    compileOnly "com.github.MilkBowl:VaultAPI:1.7"
 
     includeLibs project(':lang')
     includeLibs project(':core')
@@ -51,10 +52,10 @@ dependencies {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(21)
     }
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 tasks.named('compileJava') {
@@ -191,9 +192,7 @@ tasks.register('launchMinecraftServer', LaunchMinecraftServerTask) {
 apply from: '../curse.gradle'
 
 supportedVersions = [
-        "26.1",
-        "26.1.1",
-        "26.1.2",
+        "1.21.4",
 ]
 
 
@@ -205,7 +204,7 @@ modrinth {
     loaders = ["velocity", "waterfall", "bungeecord", "folia"]
     gameVersions = supportedVersions
     changelog = getReleaseChangelog()
-    versionName = "Folia [MC 26+] " + getVersion()
+    versionName = "Folia [MC 1.21.4] " + getVersion()
     versionNumber = getVersion() + "-folia"
     syncBodyFrom = rootProject.file("README.md").text
 }

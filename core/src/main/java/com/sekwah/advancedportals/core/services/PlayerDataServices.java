@@ -8,18 +8,13 @@ import com.sekwah.advancedportals.core.repository.IPlayerDataRepository;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import com.sekwah.advancedportals.core.serializeddata.PlayerData;
 import com.sekwah.advancedportals.core.util.Lang;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Singleton
 public final class PlayerDataServices {
-    /**
-     * Possibly change to the cache map Aztec was talking about
-     */
-    private final Map<UUID, PlayerData> tempDataMap = new HashMap<>();
-    public static final ReentrantReadWriteLock tempDataMapLock = new ReentrantReadWriteLock();
+    private final Map<UUID, PlayerData> tempDataMap = new ConcurrentHashMap<>();
 
     @Inject
     private IPlayerDataRepository tempDataRepository;
@@ -28,34 +23,26 @@ public final class PlayerDataServices {
     private ConfigRepository configRepository;
 
     public PlayerData getPlayerData(PlayerContainer player) {
-
-        tempDataMapLock.writeLock().lock();
-        var playerData = tempDataMap.computeIfAbsent(player.getUUID(), uuid -> {
-            PlayerData tempData =
-                    tempDataRepository.get(player.getUUID().toString());
-
+        return tempDataMap.computeIfAbsent(player.getUUID(), uuid -> {
+            PlayerData tempData = tempDataRepository.get(uuid.toString());
             if (tempData == null) {
                 tempData = new PlayerData();
             }
             return tempData;
         });
-        tempDataMapLock.writeLock().unlock();
-        return playerData;
     }
 
     public void setJoinCooldown(PlayerContainer player) {
         PlayerData tempData = getPlayerData(player);
-        tempData.setJoinCooldown(configRepository.getPortalCooldown() * 1000);
+        tempData.setJoinCooldown(configRepository.getPortalCooldown() * 1000L);
     }
 
     public void playerLeave(PlayerContainer player) {
-        if(!configRepository.disablePlayerDataSaving()) {
-            tempDataRepository.save(player.getUUID().toString(),
-                    getPlayerData(player));
+        UUID uuid = player.getUUID();
+        PlayerData data = tempDataMap.remove(uuid);
+        if (!configRepository.disablePlayerDataSaving() && data != null) {
+            tempDataRepository.save(uuid.toString(), data);
         }
-        tempDataMapLock.writeLock().lock();
-        tempDataMap.remove(player.getUUID());
-        tempDataMapLock.writeLock().unlock();
     }
 
     public void playerSelectorActivate(PlayerContainer player,

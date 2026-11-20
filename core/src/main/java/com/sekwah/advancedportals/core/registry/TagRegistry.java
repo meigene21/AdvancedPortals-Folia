@@ -4,6 +4,8 @@ import com.google.inject.Inject;
 import com.sekwah.advancedportals.core.AdvancedPortalsCore;
 import com.sekwah.advancedportals.core.warphandler.Tag;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Allows a portal to register a tag and add a handler. If a plugin wants to
@@ -15,14 +17,17 @@ public class TagRegistry {
     @Inject
     AdvancedPortalsCore portalsCore;
 
-    private final ArrayList<String> literalTags = new ArrayList<>();
+    private final List<String> literalTags = new CopyOnWriteArrayList<>();
 
-    private final ArrayList<Tag> tags = new ArrayList<>();
+    private final List<Tag> tags = new CopyOnWriteArrayList<>();
 
-    private final Map<String, Tag> tagMap = new HashMap<>();
-    private final Map<String, Tag.Activation> activationTags = new HashMap<>();
-    private final Map<String, Tag.Creation> creationTags = new HashMap<>();
-    private final Map<String, Tag.TagStatus> statusTags = new HashMap<>();
+    private final Map<String, Tag> tagMap = new ConcurrentHashMap<>();
+    private final Map<String, Tag.Activation> activationTags =
+        new ConcurrentHashMap<>();
+    private final Map<String, Tag.Creation> creationTags =
+        new ConcurrentHashMap<>();
+    private final Map<String, Tag.TagStatus> statusTags =
+        new ConcurrentHashMap<>();
 
     @Inject
     private AdvancedPortalsCore pluginCore;
@@ -35,6 +40,9 @@ public class TagRegistry {
      */
     public Tag.Activation getActivationHandler(String arg,
                                                Tag.TagType targetType) {
+        if (arg == null) {
+            return null;
+        }
         Tag.Activation tag = this.activationTags.get(arg);
         if (tag != null
             && Arrays.asList(tag.getTagTypes()).contains(targetType)) {
@@ -49,7 +57,7 @@ public class TagRegistry {
      * @return
      */
     public Tag.Creation getCreationHandler(String arg) {
-        return this.creationTags.get(arg);
+        return arg == null ? null : this.creationTags.get(arg);
     }
 
     /**
@@ -58,19 +66,21 @@ public class TagRegistry {
      * @return
      */
     public Tag.TagStatus getStatusHandler(String arg) {
-        return this.statusTags.get(arg);
+        return arg == null ? null : this.statusTags.get(arg);
     }
 
     /**
      * File must extend
      * @return if the tag has been registered or if it already exists.
      */
-    public boolean registerTag(Tag tag) {
+    public synchronized boolean registerTag(Tag tag) {
         pluginCore.getModule().getInjector().injectMembers(tag);
 
         String tagName = tag.getName();
-
-        this.tags.add(tag);
+        if (tagName == null) {
+            this.portalsCore.getInfoLogger().warning("A tag cannot be null.");
+            return false;
+        }
 
         // Check literal tags for clashes
         if (this.literalTags.contains(tagName)) {
@@ -80,7 +90,6 @@ public class TagRegistry {
         }
 
         String[] aliases = tag.getAliases();
-        this.literalTags.add(tagName);
         if (aliases != null) {
             for (String alias : aliases) {
                 if (this.literalTags.contains(alias)) {
@@ -89,13 +98,12 @@ public class TagRegistry {
                     return false;
                 }
             }
-
-            Collections.addAll(this.literalTags, aliases);
         }
 
-        if (tagName == null) {
-            this.portalsCore.getInfoLogger().warning("A tag cannot be null.");
-            return false;
+        this.tags.add(tag);
+        this.literalTags.add(tagName);
+        if (aliases != null) {
+            Collections.addAll(this.literalTags, aliases);
         }
 
         this.tagMap.put(tagName, tag);
@@ -116,7 +124,7 @@ public class TagRegistry {
     }
 
     public Tag getTag(String tagName) {
-        return this.tagMap.get(tagName);
+        return tagName == null ? null : this.tagMap.get(tagName);
     }
 
     public List<Tag> getTags() {

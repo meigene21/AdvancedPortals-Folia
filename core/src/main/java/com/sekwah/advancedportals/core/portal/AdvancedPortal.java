@@ -17,6 +17,7 @@ import com.sekwah.advancedportals.core.warphandler.ActivationData;
 import com.sekwah.advancedportals.core.warphandler.Tag;
 import com.sekwah.advancedportals.core.warphandler.TriggerType;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * @author sekwah41
@@ -25,15 +26,16 @@ public class AdvancedPortal implements TagTarget {
     @Inject
     private transient TagRegistry tagRegistry;
 
-    private BlockLocation maxLoc;
+    private volatile BlockLocation maxLoc;
 
-    private BlockLocation minLoc;
+    private volatile BlockLocation minLoc;
 
     private final HashMap<String, String[]> args = new HashMap<>();
 
-    private final transient List<DataTag> portalTags = new ArrayList<>();
+    private transient volatile List<DataTag> portalTags =
+        Collections.emptyList();
 
-    private transient boolean isSorted = false;
+    private transient volatile boolean isSorted = false;
 
     @Inject
     private transient PlayerDataServices playerDataServices;
@@ -64,13 +66,17 @@ public class AdvancedPortal implements TagTarget {
 
     @Override
     public String[] getArgValues(String argName) {
-        return this.args.get(argName);
+        synchronized (this.args) {
+            return this.args.get(argName);
+        }
     }
 
     @Override
     public void setArgValues(String argName, String[] argValues) {
-        this.isSorted = false;
-        this.args.put(argName, argValues);
+        synchronized (this.args) {
+            this.args.put(argName, argValues);
+            this.isSorted = false;
+        }
     }
 
     @Override
@@ -78,14 +84,19 @@ public class AdvancedPortal implements TagTarget {
         // TODO need to add the ability to add args after creation
     }
 
-    public void updatePortalTagList() {
-        portalTags.clear();
-        for (Map.Entry<String, String[]> entry : args.entrySet()) {
-            this.portalTags.add(new DataTag(entry.getKey(), entry.getValue()));
+    public synchronized void updatePortalTagList() {
+        if (this.isSorted) {
+            return;
+        }
+        List<DataTag> sortedTags = new ArrayList<>();
+        synchronized (this.args) {
+            for (Map.Entry<String, String[]> entry : args.entrySet()) {
+                sortedTags.add(new DataTag(entry.getKey(), entry.getValue()));
+            }
         }
 
         // sort the tags by priority
-        this.portalTags.sort(Comparator.comparingInt(o -> {
+        sortedTags.sort(Comparator.comparingInt(o -> {
             Tag tag = tagRegistry.getTag(o.NAME);
             if (tag instanceof Tag.OrderPriority) {
                 Tag.OrderPriority tagPriority = (Tag.OrderPriority) tag;
@@ -94,13 +105,16 @@ public class AdvancedPortal implements TagTarget {
                 return Tag.Priority.NORMAL.ordinal();
             }
         }));
-        isSorted = true;
+        this.portalTags = Collections.unmodifiableList(sortedTags);
+        this.isSorted = true;
     }
 
     @Override
     public void removeArg(String arg) {
-        this.isSorted = false;
-        this.args.remove(arg);
+        synchronized (this.args) {
+            this.args.remove(arg);
+            this.isSorted = false;
+        }
     }
 
     /**
@@ -134,6 +148,7 @@ public class AdvancedPortal implements TagTarget {
         if (!isSorted) {
             updatePortalTagList();
         }
+        List<DataTag> tagsSnapshot = this.portalTags;
 
         PlayerData playerData = playerDataServices.getPlayerData(player);
 
@@ -150,16 +165,16 @@ public class AdvancedPortal implements TagTarget {
                 Lang.translate(cooldown == 1 ? "time.second"
                                              : "time.seconds")));
             if (configRepository.playFailSound()) {
-                Random rand = new Random();
-                player.playSound("block.portal.travel", 0.05f,
-                                 rand.nextFloat() * 0.4F + 0.8F);
+                player.playSound(
+                    "block.portal.travel", 0.05f,
+                    ThreadLocalRandom.current().nextFloat() * 0.4F + 0.8F);
             }
             return ActivationResult.FAILED_DO_KNOCKBACK;
         }
 
         ActivationData data = new ActivationData(triggerType);
 
-        for (DataTag portalTag : this.portalTags) {
+        for (DataTag portalTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 portalTag.NAME, Tag.TagType.PORTAL);
             if (activationHandler != null) {
@@ -179,7 +194,7 @@ public class AdvancedPortal implements TagTarget {
                 }
             }
         }
-        for (DataTag portalTag : this.portalTags) {
+        for (DataTag portalTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 portalTag.NAME, Tag.TagType.PORTAL);
             if (activationHandler != null
@@ -188,7 +203,7 @@ public class AdvancedPortal implements TagTarget {
                 return ActivationResult.FAILED_DO_KNOCKBACK;
             }
         }
-        for (DataTag portalTag : this.portalTags) {
+        for (DataTag portalTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 portalTag.NAME, Tag.TagType.PORTAL);
             if (activationHandler != null) {
@@ -217,17 +232,22 @@ public class AdvancedPortal implements TagTarget {
     }
 
     public boolean isLocationInPortal(BlockLocation loc, int additionalArea) {
+        BlockLocation min = this.minLoc;
+        BlockLocation max = this.maxLoc;
+        if (loc == null || min == null || max == null) {
+            return false;
+        }
         double playerX = loc.getPosX();
         double playerY = loc.getPosY();
         double playerZ = loc.getPosZ();
 
-        return Objects.equals(loc.getWorldName(), this.minLoc.getWorldName())
-            && playerX >= this.minLoc.getPosX() - additionalArea
-            && playerX < this.maxLoc.getPosX() + 1 + additionalArea
-            && playerY >= this.minLoc.getPosY() - additionalArea
-            && playerY < this.maxLoc.getPosY() + 1 + additionalArea
-            && playerZ >= this.minLoc.getPosZ() - additionalArea
-            && playerZ < this.maxLoc.getPosZ() + 1 + additionalArea;
+        return Objects.equals(loc.getWorldName(), min.getWorldName())
+            && playerX >= min.getPosX() - additionalArea
+            && playerX < max.getPosX() + 1 + additionalArea
+            && playerY >= min.getPosY() - additionalArea
+            && playerY < max.getPosY() + 1 + additionalArea
+            && playerZ >= min.getPosZ() - additionalArea
+            && playerZ < max.getPosZ() + 1 + additionalArea;
     }
 
     public void setArgValues(DataTag portalTag) {
@@ -236,13 +256,18 @@ public class AdvancedPortal implements TagTarget {
 
     public ArrayList<DataTag> getArgs() {
         ArrayList<DataTag> tagList = new ArrayList<>();
-        for (Map.Entry<String, String[]> entry : this.args.entrySet()) {
-            tagList.add(new DataTag(entry.getKey(), entry.getValue()));
+        synchronized (this.args) {
+            for (Map.Entry<String, String[]> entry : this.args.entrySet()) {
+                tagList.add(new DataTag(entry.getKey(), entry.getValue()));
+            }
         }
         return tagList;
     }
 
     public boolean isTriggerBlock(String blockMaterial) {
+        if (blockMaterial == null) {
+            return false;
+        }
         String[] triggerBlocks = this.getArgValues(TriggerBlockTag.TAG_NAME);
         if (triggerBlocks != null) {
             for (String triggerBlock : triggerBlocks) {
@@ -255,7 +280,8 @@ public class AdvancedPortal implements TagTarget {
     }
 
     public String getName() {
-        return getArgValues("name")[0];
+        String[] nameValues = getArgValues("name");
+        return (nameValues != null && nameValues.length > 0) ? nameValues[0] : "";
     }
 
     @Override
@@ -264,15 +290,20 @@ public class AdvancedPortal implements TagTarget {
     }
 
     public boolean isChunkOverlapping(int chunkX, int chunkZ) {
+        BlockLocation min = this.minLoc;
+        BlockLocation max = this.maxLoc;
+        if (min == null || max == null) {
+            return false;
+        }
         int chunkMinX = chunkX * 16;
         int chunkMinZ = chunkZ * 16;
         int chunkMaxX = chunkMinX + 15;
         int chunkMaxZ = chunkMinZ + 15;
 
-        int portalMinX = minLoc.getPosX();
-        int portalMaxX = maxLoc.getPosX();
-        int portalMinZ = minLoc.getPosZ();
-        int portalMaxZ = maxLoc.getPosZ();
+        int portalMinX = min.getPosX();
+        int portalMaxX = max.getPosX();
+        int portalMinZ = min.getPosZ();
+        int portalMaxZ = max.getPosZ();
 
         return !(portalMaxX < chunkMinX || portalMinX > chunkMaxX ||
                 portalMaxZ < chunkMinZ || portalMinZ > chunkMaxZ);

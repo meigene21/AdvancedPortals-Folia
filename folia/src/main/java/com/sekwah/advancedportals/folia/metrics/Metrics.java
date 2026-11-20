@@ -115,7 +115,7 @@ public class Metrics {
                         this::appendServiceData,
                         isFolia
                                 ? null
-                                : submitDataTask -> plugin.getServer().getAsyncScheduler().runNow(plugin, (_) -> submitDataTask.run()),
+                                : submitDataTask -> plugin.getServer().getAsyncScheduler().runNow(plugin, (task) -> submitDataTask.run()),
                         plugin::isEnabled,
                         (message, error) -> this.plugin.getLogger().log(Level.WARNING, message, error),
                         (message) -> this.plugin.getLogger().log(Level.INFO, message),

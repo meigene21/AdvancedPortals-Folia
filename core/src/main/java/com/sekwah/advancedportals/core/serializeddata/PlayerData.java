@@ -16,38 +16,40 @@ public class PlayerData {
     /**
      * Portal selection position 1
      */
-    private BlockLocation pos1;
+    private volatile BlockLocation pos1;
 
     /**
      * Portal selection position 2
      */
-    private BlockLocation pos2;
+    private volatile BlockLocation pos2;
 
     /**
      * If to show portals near the player
      */
-    private boolean portalVisible = false;
+    private volatile boolean portalVisible = false;
 
     /**
      * If to show destination blocks near the player
      */
-    private boolean destiVisible;
+    private volatile boolean destiVisible;
 
     /**
      * If the player is in a portal. Stops re-triggering.
      */
-    private transient String inPortal = null;
+    private transient volatile String inPortal = null;
 
     /**
      * The next time System.currentTimeMillis() a player can use a portal.
      */
-    private transient long joinCooldown;
+    private transient volatile long joinCooldown;
 
-    private transient long portalBlockCooldown;
+    private transient volatile long portalBlockCooldown;
 
+    // Keep HashMap type for YAML ReflectiveConstructor compatibility; guard
+    // all accesses with synchronization for Folia thread safety.
     private final HashMap<String, Long> perPortalCooldowns = new HashMap<>();
 
-    private String selectedPortal;
+    private volatile String selectedPortal;
 
     public BlockLocation getPos1() {
         return pos1;
@@ -119,17 +121,27 @@ public class PlayerData {
     }
 
     public void setPortalCooldown(String portalName, long cooldown) {
-        perPortalCooldowns.put(portalName,
-                               System.currentTimeMillis() + cooldown);
+        synchronized (perPortalCooldowns) {
+            perPortalCooldowns.put(portalName,
+                                   System.currentTimeMillis() + cooldown);
+        }
     }
 
     public boolean hasPortalCooldown(String portalName) {
-        return perPortalCooldowns.containsKey(portalName)
-            && System.currentTimeMillis() < perPortalCooldowns.get(portalName);
+        synchronized (perPortalCooldowns) {
+            Long expiry = perPortalCooldowns.get(portalName);
+            return expiry != null && System.currentTimeMillis() < expiry;
+        }
     }
 
     public double getPortalCooldownLeft(String portalName) {
-        return perPortalCooldowns.get(portalName) - System.currentTimeMillis();
+        synchronized (perPortalCooldowns) {
+            Long expiry = perPortalCooldowns.get(portalName);
+            if (expiry == null) {
+                return 0;
+            }
+            return expiry - System.currentTimeMillis();
+        }
     }
 
     public void setNotInPortal() {

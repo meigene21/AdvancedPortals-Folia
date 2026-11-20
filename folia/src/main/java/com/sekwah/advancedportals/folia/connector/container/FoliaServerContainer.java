@@ -5,14 +5,14 @@ import com.sekwah.advancedportals.core.connector.containers.PlayerContainer;
 import com.sekwah.advancedportals.core.connector.containers.ServerContainer;
 import com.sekwah.advancedportals.core.connector.containers.WorldContainer;
 import com.sekwah.advancedportals.core.tags.CommandTag;
-import com.sekwah.advancedportals.shadowed.inject.Inject;
 import com.sekwah.advancedportals.folia.AdvancedPortalsPlugin;
+import com.sekwah.advancedportals.shadowed.inject.Inject;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -26,8 +26,8 @@ public class FoliaServerContainer implements ServerContainer {
     // Create an array of items
     private final List<String> commonTriggerBlockList =
         Stream.of(Material.WATER, Material.LAVA, Material.AIR,
-                Material.NETHER_PORTAL, Material.END_GATEWAY,
-                Material.END_PORTAL)
+                  Material.NETHER_PORTAL, Material.END_GATEWAY,
+                  Material.END_PORTAL)
             .map(Enum::name)
             .collect(Collectors.toList());
 
@@ -42,6 +42,9 @@ public class FoliaServerContainer implements ServerContainer {
 
     @Override
     public WorldContainer getWorld(String name) {
+        if (name == null) {
+            return null;
+        }
         World world = server.getWorld(name);
         if (world != null) {
             return new FoliaWorldContainer(world);
@@ -85,7 +88,7 @@ public class FoliaServerContainer implements ServerContainer {
         return server.getOnlinePlayers()
             .stream()
             .map(FoliaPlayerContainer::new)
-            .toArray(PlayerContainer[] ::new);
+            .toArray(PlayerContainer[]::new);
     }
 
     @Override
@@ -96,29 +99,66 @@ public class FoliaServerContainer implements ServerContainer {
 
     @Override
     public void registerIncomingChannel(String channel) {
+        AdvancedPortalsPlugin plugin = AdvancedPortalsPlugin.getInstance();
         server.getMessenger().registerIncomingPluginChannel(
-            AdvancedPortalsPlugin.getInstance(), channel,
-            (s, player, bytes)
-                -> coreListeners.incomingMessage(
-                    new FoliaPlayerContainer(player), s, bytes));
+            plugin, channel,
+            (s, player, bytes) -> {
+                if (Bukkit.isOwnedByCurrentRegion(player)) {
+                    coreListeners.incomingMessage(
+                        new FoliaPlayerContainer(player), s, bytes);
+                } else {
+                    player.getScheduler().run(
+                        plugin,
+                        task -> coreListeners.incomingMessage(
+                            new FoliaPlayerContainer(player), s, bytes),
+                        null);
+                }
+            });
     }
 
     @Override
     public void dispatchCommand(UUID uuid, String command,
                                 CommandTag.CommandLevel commandLevel) {
-        Player player = server.getPlayer(uuid);
-        switch (commandLevel) {
-            case CONSOLE:
+        AdvancedPortalsPlugin plugin = AdvancedPortalsPlugin.getInstance();
+        if (commandLevel == CommandTag.CommandLevel.CONSOLE) {
+            if (Bukkit.isGlobalTickThread()) {
                 server.dispatchCommand(server.getConsoleSender(), command);
-                break;
-            case PLAYER:
-                server.dispatchCommand(player, command);
-                break;
-            case OP:
-            case PERMISSION_WILDCARD:
-                executeCommandWithPermission(player, server, command,
-                                             commandLevel);
-                break;
+            } else {
+                server.getGlobalRegionScheduler().execute(
+                    plugin,
+                    () -> server.dispatchCommand(server.getConsoleSender(),
+                                                 command));
+            }
+            return;
+        }
+
+        Player player = server.getPlayer(uuid);
+        if (player == null) {
+            return;
+        }
+
+        Runnable action = () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            switch (commandLevel) {
+                case PLAYER:
+                    server.dispatchCommand(player, command);
+                    break;
+                case OP:
+                case PERMISSION_WILDCARD:
+                    executeCommandWithPermission(player, server, command,
+                                                 commandLevel);
+                    break;
+                default:
+                    break;
+            }
+        };
+
+        if (Bukkit.isOwnedByCurrentRegion(player)) {
+            action.run();
+        } else {
+            player.getScheduler().run(plugin, task -> action.run(), null);
         }
     }
 
@@ -133,8 +173,7 @@ public class FoliaServerContainer implements ServerContainer {
                     return;
                 }
                 PermissionAttachment permissionAttachment =
-                    player.addAttachment(
-                        server.getPluginManager().getPlugin("AdvancedPortals"));
+                    player.addAttachment(AdvancedPortalsPlugin.getInstance());
                 try {
                     permissionAttachment.setPermission("*", true);
                     server.dispatchCommand(player, command);
@@ -153,6 +192,8 @@ public class FoliaServerContainer implements ServerContainer {
                 } finally {
                     player.setOp(false);
                 }
+                break;
+            default:
                 break;
         }
     }

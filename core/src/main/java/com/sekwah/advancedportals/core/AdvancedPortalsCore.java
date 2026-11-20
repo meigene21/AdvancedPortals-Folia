@@ -23,9 +23,9 @@ import com.sekwah.advancedportals.core.util.GameScheduler;
 import com.sekwah.advancedportals.core.util.InfoLogger;
 import com.sekwah.advancedportals.core.util.Lang;
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class AdvancedPortalsCore {
     private final InfoLogger infoLogger;
@@ -41,7 +41,8 @@ public class AdvancedPortalsCore {
 
     private final ServerContainer serverContainer;
 
-    private final List<Runnable> configReloadListeners = new ArrayList<>();
+    private final List<Runnable> configReloadListeners =
+        new CopyOnWriteArrayList<>();
 
     private static AdvancedPortalsCore instance;
 
@@ -242,6 +243,9 @@ public class AdvancedPortalsCore {
     }
 
     public void onDisable() {
+        if (this.gameScheduler != null) {
+            this.gameScheduler.clearAllEvents();
+        }
         for (PlayerContainer playerContainer :
              this.serverContainer.getPlayers()) {
             playerDataRepository.playerLeave(playerContainer);

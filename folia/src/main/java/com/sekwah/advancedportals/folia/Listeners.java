@@ -5,14 +5,14 @@ import com.sekwah.advancedportals.core.portal.AdvancedPortal;
 import com.sekwah.advancedportals.core.repository.ConfigRepository;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import com.sekwah.advancedportals.core.services.PortalServices;
-import com.sekwah.advancedportals.shadowed.inject.Inject;
 import com.sekwah.advancedportals.folia.connector.container.FoliaEntityContainer;
 import com.sekwah.advancedportals.folia.connector.container.FoliaPlayerContainer;
 import com.sekwah.advancedportals.folia.utils.ContainerHelpers;
+import com.sekwah.advancedportals.shadowed.inject.Inject;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
-
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -56,6 +56,15 @@ public class Listeners implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onMoveEvent(PlayerMoveEvent event) {
         Location to = event.getTo();
+        Location from = event.getFrom();
+        if (to == null || to.getWorld() == null) {
+            return;
+        }
+        // Skip pure head-rotation (yaw/pitch only) moves to reduce per-region load
+        if (from.getWorld() == to.getWorld() && from.getX() == to.getX()
+            && from.getY() == to.getY() && from.getZ() == to.getZ()) {
+            return;
+        }
         coreListeners.playerMove(new FoliaPlayerContainer(event.getPlayer()),
                                  ContainerHelpers.toPlayerLocation(to));
     }
@@ -67,12 +76,17 @@ public class Listeners implements Listener {
             event.setCancelled(true);
         }
     }
+
     @EventHandler(ignoreCancelled = true)
     public void onEntityPortalEnterEvent(EntityPortalEnterEvent event) {
         if (event.getEntity() instanceof Player player) {
+            Location loc = event.getLocation();
+            if (loc == null || loc.getWorld() == null) {
+                return;
+            }
             if (!this.coreListeners.playerPortalEvent(
                     new FoliaPlayerContainer(player),
-                    ContainerHelpers.toPlayerLocation(event.getLocation()))) {
+                    ContainerHelpers.toPlayerLocation(loc))) {
                 event.setCancelled(true);
             }
         }
@@ -80,9 +94,13 @@ public class Listeners implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onPortalEvent(PlayerPortalEvent event) {
+        Location from = event.getFrom();
+        if (from == null || from.getWorld() == null) {
+            return;
+        }
         if (!this.coreListeners.playerPortalEvent(
                 new FoliaPlayerContainer(event.getPlayer()),
-                ContainerHelpers.toPlayerLocation(event.getFrom()))) {
+                ContainerHelpers.toPlayerLocation(from))) {
             event.setCancelled(true);
         }
     }
@@ -113,10 +131,10 @@ public class Listeners implements Listener {
     public void onBlockPlace(BlockPlaceEvent event) {
         if (!event.isCancelled()) {
             Location blockloc = event.getBlock().getLocation();
+            ItemStack itemInHand = event.getItemInHand();
 
             if (blockloc == null || blockloc.getWorld() == null
-                || event.getItemInHand() == null
-                || event.getItemInHand().getItemMeta() == null) {
+                || itemInHand == null || itemInHand.getItemMeta() == null) {
                 return;
             }
 
@@ -126,8 +144,8 @@ public class Listeners implements Listener {
                         blockloc.getWorld().getName(), blockloc.getBlockX(),
                         blockloc.getBlockY(), blockloc.getBlockZ()),
                     event.getBlockPlaced().getType().toString(),
-                    event.getItemInHand().getType().toString(),
-                    event.getItemInHand().getItemMeta().getDisplayName())) {
+                    itemInHand.getType().toString(),
+                    itemInHand.getItemMeta().getDisplayName())) {
                 event.setCancelled(true);
             }
         }
@@ -200,7 +218,8 @@ public class Listeners implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onBlockBreak(BlockBreakEvent event) {
-        ItemStack itemInHand = event.getPlayer().getItemInHand();
+        ItemStack itemInHand =
+            event.getPlayer().getInventory().getItemInMainHand();
         if (!coreListeners.blockBreak(
                 new FoliaPlayerContainer(event.getPlayer()),
                 ContainerHelpers.toBlockLocation(
@@ -236,15 +255,22 @@ public class Listeners implements Listener {
             return;
         }
         Chunk chunk = event.getChunk();
+        String worldName = chunk.getWorld().getName();
         List<AdvancedPortal> checkPortals = portalServices.getPortals()
-                .stream().filter(portal -> portal.isTriggerBlock(Material.END_GATEWAY.toString()))
-                .filter(portal -> portal.isChunkOverlapping(chunk.getX(), chunk.getZ())).collect(Collectors.toList());
+            .stream()
+            .filter(portal -> Objects.equals(portal.getMinLoc().getWorldName(),
+                                             worldName))
+            .filter(portal -> portal.isTriggerBlock(
+                        Material.END_GATEWAY.toString()))
+            .filter(portal -> portal.isChunkOverlapping(chunk.getX(),
+                                                        chunk.getZ()))
+            .collect(Collectors.toList());
 
-        if(checkPortals.isEmpty()) {
+        if (checkPortals.isEmpty()) {
             return;
         }
 
-        Arrays.stream(event.getChunk().getTileEntities(false))
+        Arrays.stream(chunk.getTileEntities(false))
             .filter(blockState -> blockState.getType() == Material.END_GATEWAY)
             .forEach(endGatewayPortal -> {
                 Location loc = endGatewayPortal.getLocation();

@@ -1,5 +1,6 @@
 package com.sekwah.advancedportals.core.connector.containers;
 
+import com.sekwah.advancedportals.core.serializeddata.PlayerLocation;
 import com.sekwah.advancedportals.core.serializeddata.Vector;
 import java.awt.*;
 import java.util.UUID;
@@ -32,6 +33,20 @@ public interface PlayerContainer extends EntityContainer, HasPermission {
     ServerContainer getServer();
 
     GameMode getGameMode();
+
+    /**
+     * Teleports the player and executes {@code onComplete} once the teleport
+     * finishes on the player's owning thread. Implementations that teleport
+     * asynchronously (such as Folia) override this to chain the callback after
+     * {@code teleportAsync} succeeds.
+     */
+    default boolean teleport(PlayerLocation location, Runnable onComplete) {
+        boolean result = teleport(location);
+        if (result && onComplete != null) {
+            onComplete.run();
+        }
+        return result;
+    }
 
     default void drawLine(Vector start, Vector end, Color color,
                           float particleDensity) {

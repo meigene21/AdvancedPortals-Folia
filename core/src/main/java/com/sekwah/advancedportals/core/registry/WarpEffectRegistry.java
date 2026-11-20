@@ -4,14 +4,15 @@ import com.google.inject.Inject;
 import com.sekwah.advancedportals.core.AdvancedPortalsCore;
 import com.sekwah.advancedportals.core.effect.WarpEffect;
 import com.sekwah.advancedportals.core.util.InfoLogger;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author sekwah41
  */
 public class WarpEffectRegistry {
-    private final Map<String, WarpEffect> warpEffects = new HashMap<>();
+    private final Map<String, WarpEffect> warpEffects =
+        new ConcurrentHashMap<>();
 
     @Inject
     private AdvancedPortalsCore portalsCore;
@@ -24,24 +25,25 @@ public class WarpEffectRegistry {
      *
      * @param name
      * @param effect
-     * @return if the effect was registered
      */
     public void registerEffect(String name, WarpEffect effect) {
         if (name == null) {
             this.infoLogger.warning("Effect name cannot be null");
             return;
         }
-        if (this.warpEffects.containsKey(name)) {
+        String key = name.toLowerCase();
+        if (this.warpEffects.putIfAbsent(key, effect) != null) {
             this.infoLogger.warning("Effect with the name: " + name
                                     + " already exists");
-            return;
         }
-        this.warpEffects.put(name, effect);
     }
 
     public WarpEffect.Visual getVisualEffect(String name) {
-        if (this.warpEffects.containsKey(name.toLowerCase())) {
-            WarpEffect effect = this.warpEffects.get(name);
+        if (name == null) {
+            return null;
+        }
+        WarpEffect effect = this.warpEffects.get(name.toLowerCase());
+        if (effect != null) {
             if (effect instanceof WarpEffect.Visual) {
                 return (WarpEffect.Visual) effect;
             } else {
@@ -57,8 +59,11 @@ public class WarpEffectRegistry {
     }
 
     public WarpEffect.Sound getSoundEffect(String name) {
-        if (this.warpEffects.containsKey(name)) {
-            WarpEffect effect = this.warpEffects.get(name);
+        if (name == null) {
+            return null;
+        }
+        WarpEffect effect = this.warpEffects.get(name.toLowerCase());
+        if (effect != null) {
             if (effect instanceof WarpEffect.Sound) {
                 return (WarpEffect.Sound) effect;
             } else {

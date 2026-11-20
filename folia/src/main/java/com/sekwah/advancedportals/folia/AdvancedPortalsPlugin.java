@@ -8,26 +8,30 @@ import com.sekwah.advancedportals.core.repository.ConfigRepository;
 import com.sekwah.advancedportals.core.services.DestinationServices;
 import com.sekwah.advancedportals.core.services.PortalServices;
 import com.sekwah.advancedportals.core.util.GameScheduler;
-import com.sekwah.advancedportals.shadowed.inject.Inject;
-import com.sekwah.advancedportals.shadowed.inject.Injector;
 import com.sekwah.advancedportals.folia.commands.subcommands.portal.ImportPortalSubCommand;
 import com.sekwah.advancedportals.folia.connector.command.FoliaCommandRegister;
 import com.sekwah.advancedportals.folia.connector.container.FoliaServerContainer;
 import com.sekwah.advancedportals.folia.importer.LegacyImporter;
 import com.sekwah.advancedportals.folia.metrics.Metrics;
 import com.sekwah.advancedportals.folia.tags.ConditionsTag;
+import com.sekwah.advancedportals.folia.tags.CostTag;
 import com.sekwah.advancedportals.folia.warpeffects.FoliaWarpEffects;
+import com.sekwah.advancedportals.shadowed.inject.Inject;
+import com.sekwah.advancedportals.shadowed.inject.Injector;
 import java.io.File;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import net.milkbowl.vault.economy.Economy;
+import org.bukkit.Bukkit;
 import org.bukkit.event.HandlerList;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class AdvancedPortalsPlugin extends JavaPlugin {
     private AdvancedPortalsCore portalsCore;
     private PhysicsListeners physicsListeners;
-    private boolean physicsEventsRegistered;
+    private Metrics metrics;
+    private volatile boolean physicsEventsRegistered;
 
     @Inject
     DestinationServices destinationServices;
@@ -50,7 +54,7 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        new Metrics(this, 4814);
+        this.metrics = new Metrics(this, 4814);
 
         Permissions.hasPermissionManager = true;
 
@@ -80,11 +84,11 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
         this.physicsListeners = injector.getInstance(PhysicsListeners.class);
         injector.injectMembers(this.physicsListeners);
         this.portalsCore.registerConfigReloadListener(
-                this::syncPhysicsEventRegistry);
+            this::syncPhysicsEventRegistry);
 
         GameScheduler scheduler = injector.getInstance(GameScheduler.class);
         this.getServer().getGlobalRegionScheduler().runAtFixedRate(
-            this, (_) -> scheduler.tick(), 1, 1);
+            this, task -> scheduler.tick(), 1L, 1L);
 
         FoliaWarpEffects warpEffects = new FoliaWarpEffects();
         injector.injectMembers(warpEffects);
@@ -98,7 +102,9 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
                                                new ImportPortalSubCommand());
 
         checkAndCreateConfig();
+        syncPhysicsEventRegistry();
         registerPlaceholderAPI();
+        checkVault();
     }
 
     private void checkAndCreateConfig() {
@@ -131,14 +137,13 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
         }
     }
 
-    private void syncPhysicsEventRegistry() {
+    private synchronized void syncPhysicsEventRegistry() {
         boolean shouldRegister = this.configRepo.getDisablePhysicsEvents();
         if (shouldRegister && !this.physicsEventsRegistered) {
             this.getServer().getPluginManager().registerEvents(
-                    this.physicsListeners, this);
+                this.physicsListeners, this);
             this.physicsEventsRegistered = true;
-        }
-        else if (!shouldRegister && this.physicsEventsRegistered) {
+        } else if (!shouldRegister && this.physicsEventsRegistered) {
             HandlerList.unregisterAll(this.physicsListeners);
             this.physicsEventsRegistered = false;
         }
@@ -146,7 +151,14 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        this.portalsCore.onDisable();
+        if (this.metrics != null) {
+            this.metrics.shutdown();
+        }
+        this.getServer().getGlobalRegionScheduler().cancelTasks(this);
+        this.getServer().getAsyncScheduler().cancelTasks(this);
+        if (this.portalsCore != null) {
+            this.portalsCore.onDisable();
+        }
     }
 
     private void registerPlaceholderAPI() {
@@ -155,5 +167,18 @@ public class AdvancedPortalsPlugin extends JavaPlugin {
             AdvancedPortalsCore.getInstance().getTagRegistry().registerTag(
                 new ConditionsTag());
         }
+    }
+
+    public void checkVault() {
+        if (this.getServer().getPluginManager().getPlugin("Vault") == null) {
+            return;
+        }
+        RegisteredServiceProvider<Economy> economyProvider =
+            Bukkit.getServicesManager().getRegistration(Economy.class);
+        if (economyProvider == null) {
+            return;
+        }
+        AdvancedPortalsCore.getInstance().getTagRegistry().registerTag(
+            new CostTag(economyProvider.getProvider()));
     }
 }
