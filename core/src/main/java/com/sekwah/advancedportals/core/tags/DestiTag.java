@@ -112,8 +112,8 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
                     tagRegistry.getActivationHandler(destiTag.NAME,
                                                      Tag.TagType.DESTINATION);
                 if (activationHandler != null) {
-                    activationHandler.postActivated(target, player,
-                                                    activationData, argData);
+                    activationHandler.postActivated(
+                        target, player, activationData, destiTag.VALUES);
                 }
             }
             String message = activationData.getMetadata(MessageTag.TAG_NAME);
@@ -169,7 +169,7 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
             }
         }
 
-        Runnable postTeleport = null;
+        final Runnable postTeleport;
         if (warpEffectEnabled) {
             postTeleport = () -> {
                 if (warpEffectVisual != null) {
@@ -180,19 +180,32 @@ public class DestiTag implements Tag.Activation, Tag.AutoComplete, Tag.Split {
                     warpEffectSound.onWarpSound(player, WarpEffect.Action.EXIT);
                 }
             };
+        } else {
+            postTeleport = null;
         }
 
-        player.teleport(destination.getLoc(), postTeleport);
-
-        for (DataTag destiTag : destination.getArgs()) {
-            Tag.Activation activationHandler =
-                tagRegistry.getActivationHandler(destiTag.NAME,
-                                                 Tag.TagType.DESTINATION);
-            if (activationHandler != null) {
-                activationHandler.activated(target, player, activationData,
-                                            argData);
-            }
-        }
+        activationData.setDeferredTeleport(onTeleportDone -> {
+            player.teleport(destination.getLoc(), succeeded -> {
+                if (Boolean.TRUE.equals(succeeded)) {
+                    if (postTeleport != null) {
+                        postTeleport.run();
+                    }
+                    for (DataTag destiTag : destination.getArgs()) {
+                        Tag.Activation activationHandler =
+                            tagRegistry.getActivationHandler(
+                                destiTag.NAME, Tag.TagType.DESTINATION);
+                        if (activationHandler != null) {
+                            activationHandler.activated(target, player,
+                                                        activationData,
+                                                        destiTag.VALUES);
+                        }
+                    }
+                }
+                if (onTeleportDone != null) {
+                    onTeleportDone.accept(Boolean.TRUE.equals(succeeded));
+                }
+            });
+        });
 
         activationData.setWarpStatus(ActivationData.WarpedStatus.WARPED);
         return true;

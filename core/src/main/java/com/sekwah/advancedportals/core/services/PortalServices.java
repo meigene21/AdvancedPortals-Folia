@@ -36,8 +36,38 @@ public class PortalServices {
     private final Map<String, AdvancedPortal> portalCache =
         new ConcurrentHashMap<>();
 
+    private volatile Map<String, List<AdvancedPortal>> portalsByWorld =
+        Collections.emptyMap();
+
     @Inject
     TagRegistry tagRegistry;
+
+    private synchronized void rebuildWorldIndex() {
+        Map<String, List<AdvancedPortal>> byWorld = new HashMap<>();
+        for (AdvancedPortal portal : portalCache.values()) {
+            BlockLocation min = portal.getMinLoc();
+            if (min != null && min.getWorldName() != null) {
+                byWorld
+                    .computeIfAbsent(min.getWorldName(), k -> new ArrayList<>())
+                    .add(portal);
+            }
+        }
+        Map<String, List<AdvancedPortal>> immutable = new HashMap<>();
+        for (Map.Entry<String, List<AdvancedPortal>> entry :
+             byWorld.entrySet()) {
+            immutable.put(entry.getKey(),
+                          Collections.unmodifiableList(entry.getValue()));
+        }
+        this.portalsByWorld = Collections.unmodifiableMap(immutable);
+    }
+
+    private List<AdvancedPortal> getPortalsInWorld(String worldName) {
+        if (worldName == null) {
+            return Collections.emptyList();
+        }
+        List<AdvancedPortal> list = this.portalsByWorld.get(worldName);
+        return list != null ? list : Collections.emptyList();
+    }
 
     public void loadPortals() {
         List<String> portalNames = portalRepository.getAllNames();
@@ -52,11 +82,15 @@ public class PortalServices {
         }
         portalCache.keySet().retainAll(loaded.keySet());
         portalCache.putAll(loaded);
+        rebuildWorldIndex();
     }
 
     public boolean inPortalRegionProtected(BlockLocation loc) {
+        if (loc == null) {
+            return false;
+        }
         int radius = configRepository.getProtectionRadius();
-        for (AdvancedPortal portal : portalCache.values()) {
+        for (AdvancedPortal portal : getPortalsInWorld(loc.getWorldName())) {
             if (portal.isLocationInPortal(loc, radius)) {
                 return true;
             }
@@ -65,8 +99,11 @@ public class PortalServices {
     }
 
     public boolean inPortalRegionProtected(PlayerLocation loc) {
+        if (loc == null) {
+            return false;
+        }
         int radius = configRepository.getProtectionRadius();
-        for (AdvancedPortal portal : portalCache.values()) {
+        for (AdvancedPortal portal : getPortalsInWorld(loc.getWorldName())) {
             if (portal.isLocationInPortal(loc, radius)) {
                 return true;
             }
@@ -87,7 +124,10 @@ public class PortalServices {
     }
 
     public String inPortalRegionGetName(BlockLocation loc, int extraBlocks) {
-        for (AdvancedPortal portal : portalCache.values()) {
+        if (loc == null) {
+            return null;
+        }
+        for (AdvancedPortal portal : getPortalsInWorld(loc.getWorldName())) {
             if (portal.isLocationInPortal(loc, extraBlocks)) {
                 return portal.getName();
             }
@@ -99,6 +139,18 @@ public class PortalServices {
         return portalCache.get(portalName);
     }
 
+    public boolean movePortal(String portalName, BlockLocation pos1,
+                              BlockLocation pos2) {
+        AdvancedPortal portal = portalCache.get(portalName);
+        if (portal == null) {
+            return false;
+        }
+        portal.updateBounds(pos1, pos2);
+        boolean saved = this.portalRepository.save(portalName, portal);
+        rebuildWorldIndex();
+        return saved;
+    }
+
     public enum PortalActivationResult {
         NOT_IN_PORTAL,
         PORTAL_TELEPORTED,
@@ -108,7 +160,16 @@ public class PortalServices {
 
     public PortalActivationResult checkPortalActivation(
         PlayerContainer player, PlayerLocation toLoc, TriggerType triggerType) {
-        if (portalCache.isEmpty()) {
+        if (toLoc == null) {
+            return PortalActivationResult.NOT_IN_PORTAL;
+        }
+        List<AdvancedPortal> worldPortals =
+            getPortalsInWorld(toLoc.getWorldName());
+        if (worldPortals.isEmpty()) {
+            PlayerData playerData = playerDataServices.getPlayerData(player);
+            if (playerData.inPortal() != null) {
+                playerData.setNotInPortal();
+            }
             return PortalActivationResult.NOT_IN_PORTAL;
         }
         if (configRepository.blockSpectatorMode()
@@ -131,10 +192,13 @@ public class PortalServices {
         boolean blockEntityTopMaterialWaterlogged = false;
         boolean loadedTopBlock = false;
 
-        for (AdvancedPortal portal : portalCache.values()) {
+        for (AdvancedPortal portal : worldPortals) {
             boolean inBottom = portal.isLocationInPortal(toLoc);
-            boolean inTop = !inBottom && portal.isLocationInPortal(blockEntityTopLoc);
-            boolean checkTop = inTop || (inBottom && portal.isLocationInPortal(blockEntityTopLoc));
+            boolean inTop =
+                !inBottom && portal.isLocationInPortal(blockEntityTopLoc);
+            boolean checkTop =
+                inTop
+                || (inBottom && portal.isLocationInPortal(blockEntityTopLoc));
 
             if (!inBottom && !inTop) {
                 continue;
@@ -164,7 +228,8 @@ public class PortalServices {
                         world.isWaterlogged(blockEntityTopLoc);
                     loadedTopBlock = true;
                 }
-                triggered = (checkWaterLogged && blockEntityTopMaterialWaterlogged)
+                triggered =
+                    (checkWaterLogged && blockEntityTopMaterialWaterlogged)
                     || portal.isTriggerBlock(blockEntityTopMaterial);
             }
 
@@ -175,13 +240,14 @@ public class PortalServices {
                 }
                 switch (portal.activate(player, triggerType)) {
                     case SUCCESS:
-                        playerData.setInPortal(portal.getName());
                         return PortalActivationResult.PORTAL_ACTIVATED;
                     case FAILED_DO_KNOCKBACK:
                         playerData.setInPortal(portal.getName());
                         double strength =
                             configRepository.getThrowbackStrength();
                         PlayerUtils.throwPlayerBack(player, strength);
+                        return PortalActivationResult.PORTAL_DENIED;
+                    default:
                         return PortalActivationResult.PORTAL_DENIED;
                 }
             }
@@ -204,6 +270,7 @@ public class PortalServices {
         try {
             this.portalRepository.delete(name);
             this.portalCache.remove(name);
+            rebuildWorldIndex();
             return true;
         } catch (IllegalArgumentException e) {
             if (player != null) {
@@ -291,6 +358,7 @@ public class PortalServices {
 
             if (this.portalRepository.save(name, portal)) {
                 this.portalCache.put(name, portal);
+                rebuildWorldIndex();
             } else {
                 return null;
             }

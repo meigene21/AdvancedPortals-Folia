@@ -4,6 +4,7 @@ import com.sekwah.advancedportals.core.serializeddata.PlayerLocation;
 import com.sekwah.advancedportals.core.serializeddata.Vector;
 import java.awt.*;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Just a temporary container for whenever advanced portals needs to get data
@@ -41,9 +42,23 @@ public interface PlayerContainer extends EntityContainer, HasPermission {
      * {@code teleportAsync} succeeds.
      */
     default boolean teleport(PlayerLocation location, Runnable onComplete) {
+        return teleport(location, success -> {
+            if (Boolean.TRUE.equals(success) && onComplete != null) {
+                onComplete.run();
+            }
+        });
+    }
+
+    /**
+     * Teleports the player and invokes {@code onComplete} with the actual
+     * teleport outcome ({@code true} if succeeded, {@code false} if cancelled
+     * or failed) on the player's owning thread.
+     */
+    default boolean teleport(PlayerLocation location,
+                             Consumer<Boolean> onComplete) {
         boolean result = teleport(location);
-        if (result && onComplete != null) {
-            onComplete.run();
+        if (onComplete != null) {
+            onComplete.accept(result);
         }
         return result;
     }

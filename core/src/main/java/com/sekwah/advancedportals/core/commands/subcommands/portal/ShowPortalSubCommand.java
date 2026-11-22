@@ -27,6 +27,8 @@ import java.util.Objects;
  */
 public class ShowPortalSubCommand
     implements SubCommand, SubCommand.SubCommandOnInit {
+    private static final int MAX_TRIGGER_PARTICLES_PER_UPDATE = 150;
+
     private volatile boolean alternate_show_trigger = true;
 
     @Inject
@@ -116,8 +118,8 @@ public class ShowPortalSubCommand
                     BlockLocation pos2 = tempData.getPos2();
 
                     if (pos1 != null && pos2 != null
-                            && pos1.getWorldName().equals(player.getWorldName())
-                            && pos2.getWorldName().equals(player.getWorldName())) {
+                        && pos1.getWorldName().equals(player.getWorldName())
+                        && pos2.getWorldName().equals(player.getWorldName())) {
                         int widthX = Math.abs(pos1.getPosX() - pos2.getPosX());
                         int widthY = Math.abs(pos1.getPosY() - pos2.getPosY());
                         int widthZ = Math.abs(pos1.getPosZ() - pos2.getPosZ());
@@ -128,37 +130,38 @@ public class ShowPortalSubCommand
                     }
 
                     if (pos1 != null
-                            && pos1.getWorldName().equals(player.getWorldName())) {
+                        && pos1.getWorldName().equals(player.getWorldName())) {
                         drawBox(player, pos1, pos1, POS1_COLOR, 0.25f);
                     }
                     if (pos2 != null
-                            && pos2.getWorldName().equals(player.getWorldName())) {
+                        && pos2.getWorldName().equals(player.getWorldName())) {
                         drawBox(player, pos2, pos2, POS2_COLOR, 0.25f);
                     }
 
                     // If both are selected and both worlds are the same as the
                     // player
                     if (pos1 != null && pos2 != null
-                            && pos1.getWorldName().equals(player.getWorldName())
-                            && pos2.getWorldName().equals(player.getWorldName())) {
+                        && pos1.getWorldName().equals(player.getWorldName())
+                        && pos2.getWorldName().equals(player.getWorldName())) {
                         if (pos1.distanceTo(pos2)
-                                <= config.maxSelectionVisualisationSize()) {
+                            <= config.maxSelectionVisualisationSize()) {
                             drawBox(player, pos1, pos2, SELECTION_COLOR, 1f);
                         }
                     }
 
                     for (AdvancedPortal portal : portalServices.getPortals()) {
                         if (Objects.equals(portal.getMinLoc().getWorldName(),
-                                player.getWorldName())
-                                && portal.isLocationInPortal(
-                                player.getLoc(), config.getShowVisibleRange())) {
+                                           player.getWorldName())
+                            && portal.isLocationInPortal(
+                                player.getLoc(),
+                                config.getShowVisibleRange())) {
                             debugVisuals(player, portal, OUTLINE_COLOR,
-                                    TRIGGER_COLOR, showTrigger);
+                                         TRIGGER_COLOR, showTrigger);
                         }
                     }
                 });
             }
-        }, 1, 5);
+        }, 1, 10);
     }
 
     private void debugVisuals(PlayerContainer player, BlockLocation pos1,
@@ -231,6 +234,8 @@ public class ShowPortalSubCommand
             drawBox(player, pos1, pos2, color, 0.5f);
 
             if (portal != null && showTrigger) {
+                int emitted = 0;
+                outer:
                 for (int x = minX; x <= maxX; x++) {
                     for (int y = minY; y <= maxY; y++) {
                         for (int z = minZ; z <= maxZ; z++) {
@@ -240,6 +245,10 @@ public class ShowPortalSubCommand
                                 player.spawnColoredDust(
                                     pos.toVector().add(OFFSET), 0.2, 0.2, 0.2,
                                     1, triggerColor);
+                                if (++emitted
+                                    >= MAX_TRIGGER_PARTICLES_PER_UPDATE) {
+                                    break outer;
+                                }
                             }
                         }
                     }

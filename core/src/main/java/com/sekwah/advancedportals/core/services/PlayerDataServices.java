@@ -3,6 +3,7 @@ package com.sekwah.advancedportals.core.services;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.sekwah.advancedportals.core.connector.containers.PlayerContainer;
+import com.sekwah.advancedportals.core.connector.containers.ServerContainer;
 import com.sekwah.advancedportals.core.repository.ConfigRepository;
 import com.sekwah.advancedportals.core.repository.IPlayerDataRepository;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
@@ -22,14 +23,31 @@ public final class PlayerDataServices {
     @Inject
     private ConfigRepository configRepository;
 
+    @Inject
+    private ServerContainer serverContainer;
+
     public PlayerData getPlayerData(PlayerContainer player) {
-        return tempDataMap.computeIfAbsent(player.getUUID(), uuid -> {
-            PlayerData tempData = tempDataRepository.get(uuid.toString());
-            if (tempData == null) {
-                tempData = new PlayerData();
-            }
-            return tempData;
-        });
+        UUID uuid = player.getUUID();
+        PlayerData existing = tempDataMap.get(uuid);
+        if (existing != null) {
+            return existing;
+        }
+
+        PlayerData created = new PlayerData();
+        PlayerData raced = tempDataMap.putIfAbsent(uuid, created);
+        if (raced != null) {
+            return raced;
+        }
+
+        if (!configRepository.disablePlayerDataSaving()) {
+            serverContainer.runAsync(() -> {
+                PlayerData loaded = tempDataRepository.get(uuid.toString());
+                if (loaded != null) {
+                    created.mergePersisted(loaded);
+                }
+            });
+        }
+        return created;
     }
 
     public void setJoinCooldown(PlayerContainer player) {
@@ -38,10 +56,19 @@ public final class PlayerDataServices {
     }
 
     public void playerLeave(PlayerContainer player) {
+        playerLeave(player, true);
+    }
+
+    public void playerLeave(PlayerContainer player, boolean async) {
         UUID uuid = player.getUUID();
         PlayerData data = tempDataMap.remove(uuid);
         if (!configRepository.disablePlayerDataSaving() && data != null) {
-            tempDataRepository.save(uuid.toString(), data);
+            if (async) {
+                serverContainer.runAsync(
+                    () -> tempDataRepository.save(uuid.toString(), data));
+            } else {
+                tempDataRepository.save(uuid.toString(), data);
+            }
         }
     }
 

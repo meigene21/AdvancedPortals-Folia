@@ -26,12 +26,13 @@ public class Destination implements TagTarget {
     @Inject
     transient TagRegistry tagRegistry;
 
-    private PlayerLocation loc;
+    private volatile PlayerLocation loc;
 
     private final HashMap<String, String[]> args = new HashMap<>();
-    private final transient List<DataTag> destiTags = new ArrayList<>();
+    private transient volatile List<DataTag> destiTags =
+        Collections.emptyList();
 
-    private transient boolean isSorted = false;
+    private transient volatile boolean isSorted = false;
 
     public Destination() {
         this.loc = new PlayerLocation();
@@ -43,37 +44,49 @@ public class Destination implements TagTarget {
 
     @Override
     public String[] getArgValues(String argName) {
-        return this.args.get(argName);
+        synchronized (this.args) {
+            return this.args.get(argName);
+        }
     }
 
     @Override
     public void setArgValues(String argName, String[] argValue) {
-        this.isSorted = false;
-        this.args.put(argName, argValue);
+        synchronized (this.args) {
+            this.args.put(argName, argValue);
+            this.isSorted = false;
+        }
     }
 
     @Override
     public void addArg(String argName, String argValues) {
-        this.isSorted = false;
+        synchronized (this.args) {
+            this.isSorted = false;
+        }
     }
 
     public void setArgValues(DataTag portalTag) {
-        this.isSorted = false;
         this.setArgValues(portalTag.NAME, portalTag.VALUES);
     }
 
     public void removeArg(String arg) {
-        this.isSorted = false;
-        this.args.remove(arg);
+        synchronized (this.args) {
+            this.args.remove(arg);
+            this.isSorted = false;
+        }
     }
 
-    private void updateDestiTagList() {
-        destiTags.clear();
-        for (Map.Entry<String, String[]> entry : args.entrySet()) {
-            this.destiTags.add(new DataTag(entry.getKey(), entry.getValue()));
+    private synchronized void updateDestiTagList() {
+        if (this.isSorted) {
+            return;
+        }
+        List<DataTag> sortedTags = new ArrayList<>();
+        synchronized (this.args) {
+            for (Map.Entry<String, String[]> entry : args.entrySet()) {
+                sortedTags.add(new DataTag(entry.getKey(), entry.getValue()));
+            }
         }
 
-        this.destiTags.sort(Comparator.comparingInt(o -> {
+        sortedTags.sort(Comparator.comparingInt(o -> {
             Tag tag = tagRegistry.getTag(o.NAME);
             if (tag instanceof Tag.OrderPriority) {
                 Tag.OrderPriority tagPriority = (Tag.OrderPriority) tag;
@@ -82,7 +95,8 @@ public class Destination implements TagTarget {
                 return Tag.Priority.NORMAL.ordinal();
             }
         }));
-        isSorted = true;
+        this.destiTags = Collections.unmodifiableList(sortedTags);
+        this.isSorted = true;
     }
 
     public boolean activate(PlayerContainer player) {
@@ -98,12 +112,8 @@ public class Destination implements TagTarget {
         if (!isSorted) {
             updateDestiTagList();
         }
-        DataTag[] destiTags = new DataTag[args.size()];
-        int i = 0;
-        for (Map.Entry<String, String[]> entry : args.entrySet()) {
-            destiTags[i++] = new DataTag(entry.getKey(), entry.getValue());
-        }
-        for (DataTag destiTag : destiTags) {
+        List<DataTag> tagsSnapshot = this.destiTags;
+        for (DataTag destiTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 destiTag.NAME, Tag.TagType.DESTINATION);
             if (activationHandler != null
@@ -112,7 +122,7 @@ public class Destination implements TagTarget {
                 return false;
             }
         }
-        for (DataTag destiTag : destiTags) {
+        for (DataTag destiTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 destiTag.NAME, Tag.TagType.DESTINATION);
             if (activationHandler != null) {
@@ -124,12 +134,11 @@ public class Destination implements TagTarget {
     }
 
     public void postActivate(PlayerContainer player, ActivationData data) {
-        DataTag[] destiTags = new DataTag[args.size()];
-        int i = 0;
-        for (Map.Entry<String, String[]> entry : args.entrySet()) {
-            destiTags[i++] = new DataTag(entry.getKey(), entry.getValue());
+        if (!isSorted) {
+            updateDestiTagList();
         }
-        for (DataTag destiTag : destiTags) {
+        List<DataTag> tagsSnapshot = this.destiTags;
+        for (DataTag destiTag : tagsSnapshot) {
             Tag.Activation activationHandler = tagRegistry.getActivationHandler(
                 destiTag.NAME, Tag.TagType.DESTINATION);
             if (activationHandler != null) {
@@ -141,14 +150,18 @@ public class Destination implements TagTarget {
 
     public ArrayList<DataTag> getArgs() {
         ArrayList<DataTag> tagList = new ArrayList<>();
-        for (Map.Entry<String, String[]> entry : this.args.entrySet()) {
-            tagList.add(new DataTag(entry.getKey(), entry.getValue()));
+        synchronized (this.args) {
+            for (Map.Entry<String, String[]> entry : this.args.entrySet()) {
+                tagList.add(new DataTag(entry.getKey(), entry.getValue()));
+            }
         }
         return tagList;
     }
 
     public String getName() {
-        return this.getArgValues("name")[0];
+        String[] nameValues = this.getArgValues("name");
+        return (nameValues != null && nameValues.length > 0) ? nameValues[0]
+                                                             : "";
     }
 
     @Override

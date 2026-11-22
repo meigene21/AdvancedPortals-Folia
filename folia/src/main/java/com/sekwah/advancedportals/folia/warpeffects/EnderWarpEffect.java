@@ -44,13 +44,9 @@ public class EnderWarpEffect implements WarpEffect.Visual, WarpEffect.Sound {
                 }
                 World world = player.getWorld();
                 Location loc = player.getLocation().clone();
-                for (int i = 0; i < 10; i++) {
-                    world.playEffect(loc, Effect.ENDER_SIGNAL, 0);
-                }
-                loc.add(0D, 1D, 0D);
-                for (int i = 0; i < 10; i++) {
-                    world.playEffect(loc, Effect.ENDER_SIGNAL, 0);
-                }
+                // Single ENDER_SIGNAL world event already renders a full
+                // particle burst; looping 20x per call flooded outbound packets.
+                world.playEffect(loc, Effect.ENDER_SIGNAL, 0);
             };
             if (Bukkit.isOwnedByCurrentRegion(player)) {
                 visualTask.run();

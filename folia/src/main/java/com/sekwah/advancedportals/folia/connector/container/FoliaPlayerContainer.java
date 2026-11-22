@@ -12,6 +12,7 @@ import com.sekwah.advancedportals.shadowed.inject.Inject;
 import java.awt.*;
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.function.Consumer;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
@@ -53,7 +54,11 @@ public class FoliaPlayerContainer
             || message.equals(Lang.getNegativePrefix())) {
             return;
         }
-        player.sendMessage(message);
+        runOnEntityThread(() -> {
+            if (this.player.isOnline()) {
+                this.player.sendMessage(message);
+            }
+        });
     }
 
     @Override
@@ -84,8 +89,13 @@ public class FoliaPlayerContainer
         if (message == null) {
             return;
         }
-        player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                                    TextComponent.fromLegacyText(message));
+        runOnEntityThread(() -> {
+            if (this.player.isOnline()) {
+                this.player.spigot().sendMessage(
+                    ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacyText(message));
+            }
+        });
     }
 
     @Override
@@ -95,31 +105,48 @@ public class FoliaPlayerContainer
 
     @Override
     public boolean teleport(PlayerLocation location) {
-        return teleport(location, null);
+        return teleport(location, (Consumer<Boolean>) null);
     }
 
     @Override
     public boolean teleport(PlayerLocation location, Runnable onComplete) {
+        return teleport(location, success -> {
+            if (Boolean.TRUE.equals(success) && onComplete != null) {
+                onComplete.run();
+            }
+        });
+    }
+
+    @Override
+    public boolean teleport(PlayerLocation location,
+                            Consumer<Boolean> onComplete) {
         if (location == null || location.getWorldName() == null) {
+            if (onComplete != null) {
+                onComplete.accept(false);
+            }
             return false;
         }
         World world = Bukkit.getWorld(location.getWorldName());
         if (world == null) {
+            if (onComplete != null) {
+                onComplete.accept(false);
+            }
             return false;
         }
         Location targetLoc = new Location(
             world, location.getPosX(), location.getPosY(), location.getPosZ(),
             location.getYaw(), location.getPitch());
-        this.player.teleportAsync(targetLoc).thenAccept(success -> {
-            if (Boolean.TRUE.equals(success) && onComplete != null) {
+        this.player.teleportAsync(targetLoc).whenComplete((success, error) -> {
+            boolean succeeded = Boolean.TRUE.equals(success) && error == null;
+            if (onComplete != null) {
                 this.player.getScheduler().run(
                     AdvancedPortalsPlugin.getInstance(),
                     task -> {
                         if (this.player.isOnline()) {
-                            onComplete.run();
+                            onComplete.accept(succeeded);
                         }
                     },
-                    null);
+                    () -> onComplete.accept(false));
             }
         });
         return true;

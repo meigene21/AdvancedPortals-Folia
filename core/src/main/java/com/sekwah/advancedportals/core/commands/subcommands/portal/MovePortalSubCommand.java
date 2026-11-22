@@ -6,10 +6,10 @@ import com.sekwah.advancedportals.core.connector.containers.CommandSenderContain
 import com.sekwah.advancedportals.core.connector.containers.PlayerContainer;
 import com.sekwah.advancedportals.core.permissions.Permissions;
 import com.sekwah.advancedportals.core.portal.AdvancedPortal;
-import com.sekwah.advancedportals.core.services.PortalServices;
-import com.sekwah.advancedportals.core.services.PlayerDataServices;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import com.sekwah.advancedportals.core.serializeddata.PlayerData;
+import com.sekwah.advancedportals.core.services.PlayerDataServices;
+import com.sekwah.advancedportals.core.services.PortalServices;
 import com.sekwah.advancedportals.core.util.Lang;
 import java.util.Collections;
 import java.util.List;
@@ -23,18 +23,21 @@ public class MovePortalSubCommand implements SubCommand {
     @Override
     public void onCommand(CommandSenderContainer sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage(Lang.getNegativePrefix() + "Usage: /portal move <name>");
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + "Usage: /portal move <name>");
             return;
         }
         PlayerContainer player = sender.getPlayerContainer();
         if (player == null) {
-            sender.sendMessage(Lang.getNegativePrefix() + Lang.translate("command.playeronly"));
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translate("command.playeronly"));
             return;
         }
         String portalName = args[1];
         AdvancedPortal portal = portalServices.getPortal(portalName);
         if (portal == null) {
-            sender.sendMessage(Lang.getNegativePrefix() + "Portal not found: " + portalName);
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + "Portal not found: " + portalName);
             return;
         }
         PlayerData tempData = playerDataServices.getPlayerData(player);
@@ -45,16 +48,21 @@ public class MovePortalSubCommand implements SubCommand {
             return;
         }
 
-        if (!tempData.getPos1().getWorldName().equals(
-                tempData.getPos2().getWorldName())) {
+        if (!pos1.getWorldName().equals(pos2.getWorldName())) {
             player.sendMessage(
-                    Lang.getNegativePrefix()
-                            + Lang.translate("portal.error.selection.differentworlds"));
+                Lang.getNegativePrefix()
+                + Lang.translate("portal.error.selection.differentworlds"));
             return;
         }
 
-        portal.updateBounds(pos1, pos2);
-        sender.sendMessage(Lang.getPositivePrefix() + Lang.translateInsertVariables("command.portal.move.complete", portalName));
+        if (portalServices.movePortal(portalName, pos1, pos2)) {
+            sender.sendMessage(Lang.getPositivePrefix()
+                               + Lang.translateInsertVariables(
+                                   "command.portal.move.complete", portalName));
+        } else {
+            sender.sendMessage(Lang.getNegativePrefix()
+                               + Lang.translate("portal.error.save"));
+        }
     }
 
     @Override
@@ -63,7 +71,8 @@ public class MovePortalSubCommand implements SubCommand {
     }
 
     @Override
-    public List<String> onTabComplete(CommandSenderContainer sender, String[] args) {
+    public List<String> onTabComplete(CommandSenderContainer sender,
+                                      String[] args) {
         if (args.length == 2) {
             return portalServices.getPortalNames();
         }

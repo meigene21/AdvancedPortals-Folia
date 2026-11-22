@@ -6,27 +6,32 @@ import com.sekwah.advancedportals.core.util.InfoLogger;
 import com.sekwah.advancedportals.core.util.Lang;
 import com.sekwah.advancedportals.core.warphandler.ActivationData;
 import com.sekwah.advancedportals.core.warphandler.Tag;
-import com.sekwah.advancedportals.shadowed.inject.Inject;
 import com.sekwah.advancedportals.folia.connector.container.FoliaPlayerContainer;
+import com.sekwah.advancedportals.shadowed.inject.Inject;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import me.clip.placeholderapi.PlaceholderAPI;
 import org.bukkit.entity.Player;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
+    private static final Pattern OPERATOR_PATTERN =
+        Pattern.compile("(?>\\s*)(<=|>=|<|>|==|!=)(?>\\s*)");
+
     @Inject
     private InfoLogger infoLogger;
 
     @Override
     public boolean preActivated(TagTarget target, PlayerContainer player,
                                 ActivationData activeData, String[] argData) {
-        if (!(player instanceof FoliaPlayerContainer)) return true;
-        FoliaPlayerContainer spigotPlayer = (FoliaPlayerContainer) player;
+        if (!(player instanceof FoliaPlayerContainer)) {
+            return true;
+        }
+        FoliaPlayerContainer foliaPlayer = (FoliaPlayerContainer) player;
         for (String condition : argData) {
-            if (!checkConditions(condition, spigotPlayer.getPlayer())) {
-                spigotPlayer.sendMessage(
-                    Lang.getNegativePrefix() + Lang.translate("tag.conditions.fail"));
+            if (!checkConditions(condition, foliaPlayer.getPlayer())) {
+                foliaPlayer.sendMessage(
+                    Lang.getNegativePrefix()
+                    + Lang.translate("tag.conditions.fail"));
                 return false;
             }
         }
@@ -41,7 +46,7 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
     @Override
     public boolean activated(TagTarget target, PlayerContainer player,
                              ActivationData activationData, String[] argData) {
-        return false;
+        return true;
     }
 
     @Override
@@ -65,8 +70,7 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
     }
 
     private boolean checkConditions(String condition, Player player) {
-        Pattern operatorPattern = Pattern.compile("(?>\\s*)(<=|>=|<|>|==|!=)(?>\\s*)");
-        Matcher matcher = operatorPattern.matcher(condition);
+        Matcher matcher = OPERATOR_PATTERN.matcher(condition);
         if (!matcher.find()) {
             infoLogger.warning("Invalid operator: " + condition);
             return false;
@@ -76,36 +80,51 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
         String placeholder = condition.substring(0, operatorStart).trim();
         String operator = matcher.group(1);
         String expectedValue = condition.substring(operatorEnd).trim();
-        String actualValue = PlaceholderAPI.setPlaceholders(player, placeholder);
+        String actualValue =
+            PlaceholderAPI.setPlaceholders(player, placeholder);
         return performComparison(actualValue, operator, expectedValue);
     }
 
-    private boolean performComparison(String actualValue, String operator, String expectedValue) {
+    private boolean performComparison(String actualValue, String operator,
+                                      String expectedValue) {
         if (isNumeric(actualValue) && isNumeric(expectedValue)) {
             double actualNumeric = Double.parseDouble(actualValue);
             double expectedNumeric = Double.parseDouble(expectedValue);
             switch (operator) {
-                case "==": return actualNumeric == expectedNumeric;
-                case "!=": return actualNumeric != expectedNumeric;
-                case "<":  return actualNumeric < expectedNumeric;
-                case ">":  return actualNumeric > expectedNumeric;
-                case "<=": return actualNumeric <= expectedNumeric;
-                case ">=": return actualNumeric >= expectedNumeric;
-                default:   return false;
+                case "==":
+                    return actualNumeric == expectedNumeric;
+                case "!=":
+                    return actualNumeric != expectedNumeric;
+                case "<":
+                    return actualNumeric < expectedNumeric;
+                case ">":
+                    return actualNumeric > expectedNumeric;
+                case "<=":
+                    return actualNumeric <= expectedNumeric;
+                case ">=":
+                    return actualNumeric >= expectedNumeric;
+                default:
+                    return false;
             }
         } else if (isBoolean(actualValue) && isBoolean(expectedValue)) {
             boolean actualBool = Boolean.parseBoolean(actualValue);
             boolean expectedBool = Boolean.parseBoolean(expectedValue);
             switch (operator) {
-                case "==": return actualBool == expectedBool;
-                case "!=": return actualBool != expectedBool;
-                default: return false;
+                case "==":
+                    return actualBool == expectedBool;
+                case "!=":
+                    return actualBool != expectedBool;
+                default:
+                    return false;
             }
         } else {
             switch (operator) {
-                case "==": return actualValue.equals(expectedValue);
-                case "!=": return !actualValue.equals(expectedValue);
-                default: return false;
+                case "==":
+                    return actualValue.equals(expectedValue);
+                case "!=":
+                    return !actualValue.equals(expectedValue);
+                default:
+                    return false;
             }
         }
     }
@@ -124,12 +143,14 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
     }
 
     @Override
-    public boolean created(TagTarget target, PlayerContainer player, String[] argData) {
+    public boolean created(TagTarget target, PlayerContainer player,
+                           String[] argData) {
         for (String condition : argData) {
             if (!isValidConditionSyntax(condition)) {
                 if (player instanceof FoliaPlayerContainer) {
                     player.sendMessage(
-                        Lang.getNegativePrefix() + Lang.translate("tag.conditions.invalid"));
+                        Lang.getNegativePrefix()
+                        + Lang.translate("tag.conditions.invalid"));
                 }
                 return false;
             }
@@ -138,9 +159,10 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
     }
 
     private boolean isValidConditionSyntax(String condition) {
-        Pattern operatorPattern = Pattern.compile("(?>\\s*)(?:<=|>=|<|>|==|!=)(?>\\s*)");
-        Matcher matcher = operatorPattern.matcher(condition);
-        if (!matcher.find()) return false;
+        Matcher matcher = OPERATOR_PATTERN.matcher(condition);
+        if (!matcher.find()) {
+            return false;
+        }
         int operatorStart = matcher.start();
         int operatorEnd = matcher.end();
         String left = condition.substring(0, operatorStart).trim();
@@ -149,6 +171,7 @@ public class ConditionsTag implements Tag.Activation, Tag.Split, Tag.Creation {
     }
 
     @Override
-    public void destroyed(TagTarget target, PlayerContainer player, String[] argData) {
+    public void destroyed(TagTarget target, PlayerContainer player,
+                          String[] argData) {
     }
 }

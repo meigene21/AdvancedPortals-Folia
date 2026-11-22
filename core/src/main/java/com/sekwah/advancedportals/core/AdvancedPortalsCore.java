@@ -248,7 +248,7 @@ public class AdvancedPortalsCore {
         }
         for (PlayerContainer playerContainer :
              this.serverContainer.getPlayers()) {
-            playerDataRepository.playerLeave(playerContainer);
+            playerDataRepository.playerLeave(playerContainer, false);
         }
         this.infoLogger.info(Lang.translate("logger.plugindisable"));
     }

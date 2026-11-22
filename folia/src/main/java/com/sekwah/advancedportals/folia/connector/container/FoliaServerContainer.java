@@ -117,6 +117,19 @@ public class FoliaServerContainer implements ServerContainer {
     }
 
     @Override
+    public void runAsync(Runnable runnable) {
+        if (runnable == null) {
+            return;
+        }
+        AdvancedPortalsPlugin plugin = AdvancedPortalsPlugin.getInstance();
+        if (plugin != null && plugin.isEnabled()) {
+            server.getAsyncScheduler().runNow(plugin, task -> runnable.run());
+        } else {
+            runnable.run();
+        }
+    }
+
+    @Override
     public void dispatchCommand(UUID uuid, String command,
                                 CommandTag.CommandLevel commandLevel) {
         AdvancedPortalsPlugin plugin = AdvancedPortalsPlugin.getInstance();

@@ -1,6 +1,7 @@
 package com.sekwah.advancedportals.core.serializeddata;
 
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Possibly one of the only files in this package not designed to be
@@ -146,5 +147,44 @@ public class PlayerData {
 
     public void setNotInPortal() {
         this.inPortal = null;
+    }
+
+    /**
+     * Merges persisted fields from an asynchronously loaded {@link PlayerData}
+     * snapshot without clobbering live session state (join cooldown, inPortal,
+     * or newer selections/cooldowns).
+     */
+    public void mergePersisted(PlayerData loaded) {
+        if (loaded == null || loaded == this) {
+            return;
+        }
+        if (this.pos1 == null && loaded.pos1 != null) {
+            this.pos1 = loaded.pos1;
+        }
+        if (this.pos2 == null && loaded.pos2 != null) {
+            this.pos2 = loaded.pos2;
+        }
+        if (this.selectedPortal == null && loaded.selectedPortal != null) {
+            this.selectedPortal = loaded.selectedPortal;
+        }
+        if (!this.portalVisible && loaded.portalVisible) {
+            this.portalVisible = true;
+        }
+        if (!this.destiVisible && loaded.destiVisible) {
+            this.destiVisible = true;
+        }
+        long now = System.currentTimeMillis();
+        synchronized (loaded.perPortalCooldowns) {
+            synchronized (this.perPortalCooldowns) {
+                for (Map.Entry<String, Long> entry :
+                     loaded.perPortalCooldowns.entrySet()) {
+                    Long loadedExpiry = entry.getValue();
+                    if (loadedExpiry != null && loadedExpiry > now) {
+                        this.perPortalCooldowns.merge(
+                            entry.getKey(), loadedExpiry, Math::max);
+                    }
+                }
+            }
+        }
     }
 }

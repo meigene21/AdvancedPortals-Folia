@@ -3,6 +3,7 @@ package com.sekwah.advancedportals.core.warphandler;
 import com.sekwah.advancedportals.core.serializeddata.PlayerLocation;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Created by on 30/07/2016.
@@ -19,6 +20,8 @@ public class ActivationData {
     private final TriggerType triggerType;
 
     private final Map<String, String> metadata = new HashMap<>();
+
+    private Consumer<Consumer<Boolean>> deferredTeleport;
 
     public WarpedStatus getWarped() {
         return this.warpStatus;
@@ -47,6 +50,15 @@ public class ActivationData {
 
     public void setMetadata(String key, String value) {
         this.metadata.put(key, value);
+    }
+
+    public Consumer<Consumer<Boolean>> getDeferredTeleport() {
+        return this.deferredTeleport;
+    }
+
+    public void setDeferredTeleport(
+        Consumer<Consumer<Boolean>> deferredTeleport) {
+        this.deferredTeleport = deferredTeleport;
     }
 
     /**

@@ -18,6 +18,7 @@ import com.sekwah.advancedportals.core.warphandler.Tag;
 import com.sekwah.advancedportals.core.warphandler.TriggerType;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 
 /**
  * @author sekwah41
@@ -136,6 +137,18 @@ public class AdvancedPortal implements TagTarget {
         this.maxLoc = new BlockLocation(loc2.getWorldName(), maxX, maxY, maxZ);
     }
 
+    private void runPostActivated(List<DataTag> tagsSnapshot,
+                                  PlayerContainer player, ActivationData data) {
+        for (DataTag portalTag : tagsSnapshot) {
+            Tag.Activation activationHandler = tagRegistry.getActivationHandler(
+                portalTag.NAME, Tag.TagType.PORTAL);
+            if (activationHandler != null) {
+                activationHandler.postActivated(
+                    this, player, data, this.getArgValues(portalTag.NAME));
+            }
+        }
+    }
+
     /**
      * @param player        The player on the server attempting to use an
      *     advanced
@@ -203,14 +216,25 @@ public class AdvancedPortal implements TagTarget {
                 return ActivationResult.FAILED_DO_KNOCKBACK;
             }
         }
-        for (DataTag portalTag : tagsSnapshot) {
-            Tag.Activation activationHandler = tagRegistry.getActivationHandler(
-                portalTag.NAME, Tag.TagType.PORTAL);
-            if (activationHandler != null) {
-                activationHandler.postActivated(
-                    this, player, data, this.getArgValues(portalTag.NAME));
-            }
+
+        Consumer<Consumer<Boolean>> deferredTeleport =
+            data.getDeferredTeleport();
+        if (deferredTeleport != null && data.hasActivated()) {
+            // Mark player in-portal immediately so rapid move ticks do not
+            // re-trigger activation while teleportAsync is in flight.
+            playerData.setPortalBlockCooldown(1000);
+            playerData.setInPortal(this.getName());
+            deferredTeleport.accept(succeeded -> {
+                if (Boolean.TRUE.equals(succeeded)) {
+                    runPostActivated(tagsSnapshot, player, data);
+                } else {
+                    playerData.setNotInPortal();
+                }
+            });
+            return ActivationResult.SUCCESS;
         }
+
+        runPostActivated(tagsSnapshot, player, data);
         if (data.hasActivated()) {
             playerData.setPortalBlockCooldown(1000);
             playerData.setInPortal(this.getName());
@@ -281,7 +305,8 @@ public class AdvancedPortal implements TagTarget {
 
     public String getName() {
         String[] nameValues = getArgValues("name");
-        return (nameValues != null && nameValues.length > 0) ? nameValues[0] : "";
+        return (nameValues != null && nameValues.length > 0) ? nameValues[0]
+                                                             : "";
     }
 
     @Override
@@ -305,7 +330,7 @@ public class AdvancedPortal implements TagTarget {
         int portalMinZ = min.getPosZ();
         int portalMaxZ = max.getPosZ();
 
-        return !(portalMaxX < chunkMinX || portalMinX > chunkMaxX ||
-                portalMaxZ < chunkMinZ || portalMinZ > chunkMaxZ);
+        return !(portalMaxX < chunkMinX || portalMinX > chunkMaxX
+                 || portalMaxZ < chunkMinZ || portalMinZ > chunkMaxZ);
     }
 }
